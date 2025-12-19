@@ -18,10 +18,11 @@ print(f"Using folder: {args.folders or args.folder or args.sync_folder}")
 
 
 if args.sync_folder:
+    fs = FlickrSync(api_key=args.api_key, api_secret=args.api_secret, number_of_sets=200, read_photos=read_photos, limit=1)
+
     folder_path = os.path.abspath(args.sync_folder)
     read_photos = True
     files = FolderToSync(folder_path=folder_path)
-    fs = FlickrSync(api_key=args.api_key, api_secret=args.api_secret, number_of_sets=200, read_photos=read_photos, limit=1)
     files_to_upload: list[str] = []
     for on_disk_key, on_disk_value in files.file_names.items():
         if on_disk_key not in fs.all_photos_title:
@@ -30,16 +31,17 @@ if args.sync_folder:
     fs.upload_photos_parallel(files=files_to_upload, cnt=5)
 
 elif args.folder:
-    folder_path = os.path.abspath(os.path.join("y:\\2025", args.folder))
+    folder_path = os.path.abspath(os.path.join("/Volumes/photo/2025", args.folder))
     files = FolderToSync(folder_path=folder_path)
     fs = FlickrSync(api_key=args.api_key, api_secret=args.api_secret, number_of_sets=200, read_photos=read_photos, limit=1)
     print(f"Number of files in folder: {len(files.files)}")
     fs.upload_photos_parallel(files=files.files, cnt=5)
 
-elif args.folders:
+
+elif 1 or args.folders:
     files_by_folder: dict[str, FolderToSync] = {}
     for folder in args.folders.split(","):
-        folder_path = os.path.abspath(os.path.join("y:\\2025", folder))
+        folder_path = os.path.abspath(os.path.join("/Volumes/photo/2025", folder))
         print(f"Processing folder: {folder_path}")
         files_by_folder.update({folder: FolderToSync(folder_path=folder_path)})
 
@@ -49,5 +51,5 @@ elif args.folders:
         for on_disk_key, on_disk_value in files.file_names.items():
             files_to_upload.append(on_disk_value)
     print(f"Number of files in folders: {len(files_to_upload)}")
-    fs = FlickrSync(api_key=args.api_key, api_secret=args.api_secret, number_of_sets=200, read_photos=read_photos, limit=1)
-    fs.upload_photos_parallel(files=files_to_upload, cnt=1)
+    fs = FlickrSync(api_key=args.api_key, api_secret=args.api_secret, number_of_sets=411, read_photos=read_photos, limit=11)
+    fs.upload_photos_parallel(files=files_to_upload, cnt=15)

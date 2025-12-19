@@ -1,8 +1,20 @@
 from requests_oauthlib import OAuth1Session
 import webbrowser
 import os
-API_KEY = os.getenv("FLICKR_API_KEY", "")
-API_SECRET = os.getenv("FLICKR_API_SECRET", "")
+
+
+import flickrapi
+ 
+api_key = u'd'
+api_secret = u'd'
+ 
+flickr = flickrapi.FlickrAPI(api_key, api_secret)
+flickr.authenticate_via_browser(perms='write')
+
+
+
+API_KEY = os.getenv("FLICKR_API_KEY", "d")
+API_SECRET = os.getenv("FLICKR_API_SECRET", "d")
 
 # Flickr OAuth-végpontok
 REQUEST_TOKEN_URL = "https://www.flickr.com/services/oauth/request_token"

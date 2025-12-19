@@ -1,6 +1,8 @@
 import random
 import os
-
+import re
+import shutil
+from pathlib import Path
 
 def get_folders_from_path(folder_path):
     """
@@ -19,8 +21,7 @@ def get_folders_from_path(folder_path):
     print(f"Found {len(folders)} folders in {folder_path}.")
     return folders
 
-
-def read_file_names_from_folder_recursively(folder_path, file_extension=None, file_extension_list=None):
+def read_file_names_from_folder_recursively(folder_path, file_extension=None, file_extension_list=None, folder_part_re: str = ""):
     """
     Recursively read all file names from a given folder path.
 
@@ -32,11 +33,13 @@ def read_file_names_from_folder_recursively(folder_path, file_extension=None, fi
     """
     file_names = []
     for root, _, files in os.walk(folder_path):
-        if file_extension:
-            files = list(filter(lambda file: file_extension in file, files))
-        elif file_extension_list:
-            files = list(filter(lambda file: any(ext in file for ext in file_extension_list), files))
-
+        files: list[Path] = [Path(os.path.join(root, f)) for f in files]
+        if file_extension and not file_extension_list and not folder_part_re:
+            files = list(filter(lambda file: file_extension in str(file), files))
+        elif file_extension_list and not folder_part_re:
+            files = list(filter(lambda file: any(ext in str(file) for ext in file_extension_list), files))
+        elif folder_part_re and file_extension_list:
+            files = list(filter(lambda file: re.search(folder_part_re, str(file)) and any(ext in str(file) for ext in file_extension_list), files))
         for file in files:
             file_names.append(os.path.join(root, file))
     print(f"Found {len(file_names)} files with extension {file_extension or file_extension_list} in {folder_path}.")
@@ -69,7 +72,7 @@ def get_random_file_from_list(file_list):
     return random.choice(file_list)
 
 
-def copy_files_to_dest_until_mb_limit(file_list, dest_folder, mb_limit):
+def copy_files_to_dest_until_mb_limit(file_list, dest_folder, mb_limit: int = 0, count_limit: int = 0):
     """
     Copy files from a list to a destination folder until the size limit is reached.
 
@@ -83,11 +86,11 @@ def copy_files_to_dest_until_mb_limit(file_list, dest_folder, mb_limit):
     """
     total_size = 0
     total_images = 0
-    while total_size < mb_limit:
+    while (mb_limit and total_size < mb_limit) or (count_limit and total_images < count_limit):
         try:
             file = get_random_file_from_list(file_list=file_list)
             file_size = get_files_size_in_mb(file)
-            os.system(f"copy {file} {dest_folder}")
+            shutil.copy(file, dest_folder)
             total_size += file_size
             total_images += 1
             print(f"Copied {file} to {dest_folder}. Current total size: {total_size:.2f} MB")
@@ -99,20 +102,13 @@ def copy_files_to_dest_until_mb_limit(file_list, dest_folder, mb_limit):
 
 if __name__ == "__main__":
     # Example usage
-    folders = get_folders_from_path(folder_path="y:\\")
+    folders = get_folders_from_path(folder_path="")
     print(f"Found {len(folders)} folders.")
 
     # Read files from each year folder
-    files_2019 = read_file_names_from_folder_recursively(folder_path="y:\\2019\\", file_extension=".jpg")
 
-    files_2019 = read_file_names_from_folder_recursively(folder_path="y:\\2019\\", file_extension=".jpg")
-    files_2020 = read_file_names_from_folder_recursively(folder_path="y:\\2020\\", file_extension=".jpg")
-    files_2021 = read_file_names_from_folder_recursively(folder_path="y:\\2021\\", file_extension=".jpg")
-    files_2022 = read_file_names_from_folder_recursively(folder_path="y:\\2022\\", file_extension=".jpg")
-    files_2023 = read_file_names_from_folder_recursively(folder_path="y:\\2023\\", file_extension=".jpg")
-    files_2024 = read_file_names_from_folder_recursively(folder_path="y:\\2024\\", file_extension=".jpg")
-    files_2025 = read_file_names_from_folder_recursively(folder_path="y:\\2025\\", file_extension=".jpg")
+    files_2025 = read_file_names_from_folder_recursively(folder_path="", folder_part_re=None, file_extension_list=[".jpg", ".jpeg", ".png"])
 
-    files = files_2019 + files_2020 + files_2021 + files_2022 + files_2023 + files_2024 + files_2025
+    files = files_2025
 
-    copy_files_to_dest_until_mb_limit(file_list=files, dest_folder="D:\\", mb_limit=28 * 1024)
+    copy_files_to_dest_until_mb_limit(file_list=files, dest_folder=os.path.abspath(""), count_limit=333)

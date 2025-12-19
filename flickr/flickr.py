@@ -18,6 +18,7 @@ import threading
 import urllib3
 import shutil
 import mimetypes
+from pathlib import Path
 # Suppress warning logs from the exif/plum modules
 logging.getLogger("exif").setLevel(logging.ERROR)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -195,14 +196,14 @@ class Myflickr:
 class flickr(Myflickr):
     def __init__(self, api_key=None, api_secret=None, singleton: bool = True):
         self.flickr_token = FlickrToken(
-            api_key=api_key, api_secret=api_secret, oauth_token=OAUTH_TOKEN, oauth_token_secret=OAUTH_TOKEN_SECRET
+            api_key=api_key, api_secret=api_secret, oauth_token=os.environ.get("OAUTH_TOKEN"), oauth_token_secret=os.environ.get("OAUTH_TOKEN_SECRET")
         )
         super().__init__(api_key=self.flickr_token.api_key, api_secret=self.flickr_token.api_secret, singleton=singleton)
         self.oauth_client = Client(
             client_key=self.flickr_token.api_key,
             client_secret=self.flickr_token.api_secret,
-            resource_owner_key=self.flickr_token.oauth_token,
-            resource_owner_secret=self.flickr_token.oauth_token_secret,
+            resource_owner_key=self.flickr_api.flickr_oauth.resource_owner_key,
+            resource_owner_secret=self.flickr_api.flickr_oauth.resource_owner_secret,
         )
 
     def _upload(
@@ -555,11 +556,11 @@ class FlickrSync:
 
 class FilesInSet:
     def __init__(self, full_path: str = ""):
-        splitted = full_path.split("\\")
+        path = Path(full_path) if full_path else None
         self.full_path = full_path
-        self.sets = splitted[2:-1] if full_path else ""
-        self.filename = splitted[-1] if full_path else ""
-        self.filename_without_ext = re.sub(r"\.[^.]+$", "", splitted[-1])
+        self.sets = list(path.parts[-3:-1]) if full_path else ""
+        self.filename = path.name if full_path else ""
+        self.filename_without_ext = path.stem if full_path else ""
         self.is_valid: bool = True if self.filename_without_ext else False
         self.file_obj = None
 

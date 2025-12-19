@@ -1,0 +1,5 @@
+*.pyc
+flickr.egg-info/top_level.txt
+flickr.egg-info/SOURCES.txt
+flickr.egg-info/PKG-INFO
+flickr.egg-info/dependency_links.txt

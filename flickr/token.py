@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 
-TOKEN_FILE = Path.home() / ".flickr_tokens.json"
+TOKEN_FILE = Path.home() / "flickr_tokens.json"
 
 
 class FlickrToken:
