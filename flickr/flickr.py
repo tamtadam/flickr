@@ -1,6 +1,6 @@
 import flickrapi
 from exif import Image
-import os, re
+import os
 from flickr.image_random import read_file_names_from_folder_recursively, get_folders_from_path
 import time
 from common.my_threading.my_threading import ThreadPooler, execute_in_parallel
@@ -19,11 +19,29 @@ import urllib3
 import shutil
 import mimetypes
 from pathlib import Path
+import ssl
+import urllib3
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
+
 # Suppress warning logs from the exif/plum modules
 logging.getLogger("exif").setLevel(logging.ERROR)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 COUNTER_LOCK = threading.Lock()
 
+
+class FlickrSSLAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        context = create_urllib3_context()
+        # Suppress the OpenSSL 3.x crash on dropped sockets
+        context.options |= getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8)
+        kwargs["ssl_context"] = context
+        return super().init_poolmanager(*args, **kwargs)
+
+
+session = requests.Session()
+session.mount("https://flickr.com", FlickrSSLAdapter())
 
 # flickr.authenticate_via_browser(perms="write")
 
@@ -196,7 +214,10 @@ class Myflickr:
 class flickr(Myflickr):
     def __init__(self, api_key=None, api_secret=None, singleton: bool = True):
         self.flickr_token = FlickrToken(
-            api_key=api_key, api_secret=api_secret, oauth_token=os.environ.get("OAUTH_TOKEN"), oauth_token_secret=os.environ.get("OAUTH_TOKEN_SECRET")
+            api_key=api_key,
+            api_secret=api_secret,
+            oauth_token=os.environ.get("OAUTH_TOKEN"),
+            oauth_token_secret=os.environ.get("OAUTH_TOKEN_SECRET"),
         )
         super().__init__(api_key=self.flickr_token.api_key, api_secret=self.flickr_token.api_secret, singleton=singleton)
         self.oauth_client = Client(
@@ -236,35 +257,29 @@ class flickr(Myflickr):
             "tags": tags,
         }
         body_for_signature = urlencode(text_params)
+
         signed_url, oauth_headers, _ = self.oauth_client.sign(
             UPLOAD_URL,
             http_method="POST",
             body=body_for_signature,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
+        final_upload_url = f"{signed_url}&{body_for_signature}" if "?" in signed_url else f"{signed_url}?{body_for_signature}"
         mime, _ = mimetypes.guess_type(filename)
-        """
-        m = MultipartEncoder(
-            fields={
-                **text_params,
-                "photo": (os.path.basename(filename), filename, mime),
-            }
-        )
-        """
         with open(filename, "rb") as f:
-            fields = {**text_params, "photo": (os.path.basename(filename), f.read(), mime)}
-            body, content_type = encode_multipart_formdata(fields)
-        
-        headers = {
-            "Authorization": oauth_headers["Authorization"],
-            "Content-Type": content_type,
-        }
-        #body = m.to_string()
-        response: URLLibResponse = URLLibRequest.post(
-            url=signed_url,
-            data=body,
-            headers=headers,
-        )
+            # fields = {**text_params, "photo": (os.path.basename(filename), f.read(), mime)}
+            # body, content_type = encode_multipart_formdata(fields)
+            encoder = MultipartEncoder(
+                fields={
+                    "photo": (os.path.basename(filename), f, mime),
+                }
+            )
+
+            oauth_headers["Content-Type"] = encoder.content_type
+            # response = session.post(final_upload_url, headers=oauth_headers, data=encoder, timeout=(60, 1800))
+            response: URLLibResponse = URLLibRequest.post(
+                url=final_upload_url, data=encoder, headers=oauth_headers, timeout=kwargs.get("timeout")
+            )
         return extract_photoid(response.data)
 
     def upload(
@@ -282,6 +297,7 @@ class flickr(Myflickr):
             hidden=hidden,
             format=format,
             verify=False,
+            timeout=1200,
         )
         photo = Photo(
             {
@@ -298,8 +314,15 @@ class flickr(Myflickr):
         print(f"Uploaded photo by {threading.current_thread().name}: {title} with ID: {photo.id} in {end_time - start_time:.2f} seconds")
         return photo
 
-    class photosets:
+    class people:
+        class getLimits:
+            def __init__(self):
+                self.flickr_api = Myflickr().flickr_api
 
+            def call(self):
+                return self.flickr_api.people.getLimits(api_key=Myflickr.api_key)
+
+    class photosets:
         class create:
             def __init__(self, title, description, primary_photo_id):
                 self.flickr_api = Myflickr().flickr_api
@@ -324,7 +347,6 @@ class flickr(Myflickr):
                 self.photo = photo
 
             def call(self):
-
                 try:
                     result = self.flickr_api.photosets.addPhoto(photoset_id=self.photoset.id, photo_id=self.photo.id)
                     if result.get("stat") == "ok":
@@ -454,7 +476,7 @@ class FlickrSync:
         singleton: bool = True,
     ):
         self.flickr = flickr(api_key=api_key, api_secret=api_secret, singleton=singleton)
-        self.photosets = self.flickr.photosets.getList(user_id="138370151@N02", per_page=number_of_sets, page=page, limit=limit).call()
+        self.photosets = self.flickr.photosets.getList(user_id="138370151@N02", per_page=number_of_sets, page=page, limit=3).call()
         print(f"Found {len(self.photosets)} photosets in Flickr.")
 
         if read_photos:
@@ -484,12 +506,18 @@ class FlickrSync:
         return photosets
 
     def copy_failed_media_to_folder(self, file: "FilesInSet") -> None:
+        if "FAILED" in file.full_path:
+            return
+
         folder = os.path.join(os.path.dirname(file.full_path), "FAILED")
+
         if not os.path.exists(folder):
             os.makedirs(folder)
+
         shutil.copyfile(src=file.full_path, dst=os.path.join(folder, file.filename))
 
     def upload_photo(self, file: "FilesInSet", cnt: int = 3) -> Photo:
+        self.flickr.people.getLimits().call()
         if cnt <= 0:
             print(f"Failed to upload {file.filename_without_ext} after multiple attempts.")
             self.copy_failed_media_to_folder(file)
@@ -512,7 +540,7 @@ class FlickrSync:
             time.sleep(10)
             return self.upload_photo(file=file, cnt=cnt - 1)
 
-        photosets: list[PhotoSet] = self.get_photosets_by_titles(titles=file.sets + ["__2025__"], photo=photo)
+        photosets: list[PhotoSet] = self.get_photosets_by_titles(titles=file.sets + ["__2026__"], photo=photo)
 
         for photoset in photosets:
             self.flickr.photosets.addPhoto(photoset=photoset, photo=photo).call()
@@ -559,24 +587,36 @@ class FilesInSet:
         path = Path(full_path) if full_path else None
         self.full_path = full_path
         self.sets = list(path.parts[-3:-1]) if full_path else ""
+        self.sets.remove("FAILED") if "FAILED" in self.sets else None
+
         self.filename = path.name if full_path else ""
         self.filename_without_ext = path.stem if full_path else ""
         self.is_valid: bool = True if self.filename_without_ext else False
+        if "FAILED" in self.full_path:
+            self.is_valid = False
+
         self.file_obj = None
 
 
 class FolderToSync:
-    def __init__(self, folder_path: str):
+    def __init__(self, folder_path: str, upload_failed: bool = False):
         self.folder_path = folder_path
+        self.upload_failed = upload_failed
         self.files = read_file_names_from_folder_recursively(
             folder_path=self.folder_path, file_extension_list=[".jpg", ".mp4", ".JPG", ".MP4"]
         )
         self.files = [FilesInSet(full_path=i) for i in self.files]
-        self.files = list(filter(lambda x: x.is_valid, self.files))
+
+        if self.upload_failed:
+            self.files = list(filter(lambda x: not x.is_valid, self.files))
+
+        else:
+            self.files = list(filter(lambda x: x.is_valid, self.files))
+
         self.file_names: dict[str, FilesInSet] = {i.filename_without_ext: i for i in self.files}
 
-    def add_file(self, file: FilesInSet):
-        self.files.append(file)
+    def add_file(self, file: FilesInSet) -> None:
+        return self.files.append(file)
 
     def get_full_path_by_filename_list(self, filename_list: list[str]) -> list[str]:
         return [file.full_path for file in self.files if file.filename_without_ext in filename_list]
@@ -584,6 +624,7 @@ class FolderToSync:
 
 if __name__ == "__main__":
     import os
+
     API_KEY = os.getenv("FLICKR_API_KEY", "")
     API_SECRET = os.getenv("FLICKR_API_SECRET", "")
     fs = FlickrSync(api_key=API_KEY, api_secret=API_SECRET, number_of_sets=500, read_photos=True, limit=1)
