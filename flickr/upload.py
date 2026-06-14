@@ -3,8 +3,8 @@ import urllib3
 from oauthlib.oauth1 import Client
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 from urllib.parse import urlencode
-from apicommon.base.lib.URLLibRequest import URLLibRequest
-from apicommon.base.lib.URLLibResponse import URLLibResponse
+from flickr.utils.url_lib_request import URLLibRequest
+from flickr.utils.url_lib_response import URLLibResponse
 import os
 # — your creds here —
 API_KEY = os.getenv("FLICKR_API_KEY", "")

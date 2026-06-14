@@ -3,12 +3,12 @@ from exif import Image
 import os
 from flickr.image_random import read_file_names_from_folder_recursively, get_folders_from_path
 import time
-from common.my_threading.my_threading import ThreadPooler, execute_in_parallel
+from flickr.utils.my_threading import ThreadPooler, execute_in_parallel
 import math
 import logging
 from flickr.token import FlickrToken
-from apicommon.base.lib.URLLibRequest import URLLibRequest
-from apicommon.base.lib.URLLibResponse import URLLibResponse
+from flickr.utils.url_lib_request import URLLibRequest
+from flickr.utils.url_lib_response import URLLibResponse
 import xml.etree.ElementTree as ET
 from oauthlib.oauth1 import Client
 from urllib.parse import urlencode
@@ -536,6 +536,12 @@ class FlickrSync:
                 is_family=0,
                 tags=tags,
             )
+
+            if photo and not file.is_valid:
+                file.is_valid = True
+                print(f"Successfully uploaded {file.filename_without_ext} with ID: {photo.id}")
+                if os.path.exists(file.full_path):
+                    os.remove(file.full_path)
         except Exception as e:
             time.sleep(10)
             return self.upload_photo(file=file, cnt=cnt - 1)

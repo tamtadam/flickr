@@ -4,6 +4,7 @@ import re
 import shutil
 from pathlib import Path
 
+
 def get_folders_from_path(folder_path):
     """
     Get all folders from a given folder path.
@@ -20,6 +21,7 @@ def get_folders_from_path(folder_path):
     folders = [f.path for f in os.scandir(folder_path) if f.is_dir()]
     print(f"Found {len(folders)} folders in {folder_path}.")
     return folders
+
 
 def read_file_names_from_folder_recursively(folder_path, file_extension=None, file_extension_list=None, folder_part_re: str = ""):
     """
@@ -39,7 +41,9 @@ def read_file_names_from_folder_recursively(folder_path, file_extension=None, fi
         elif file_extension_list and not folder_part_re:
             files = list(filter(lambda file: any(ext in str(file) for ext in file_extension_list), files))
         elif folder_part_re and file_extension_list:
-            files = list(filter(lambda file: re.search(folder_part_re, str(file)) and any(ext in str(file) for ext in file_extension_list), files))
+            files = list(
+                filter(lambda file: re.search(folder_part_re, str(file)) and any(ext in str(file) for ext in file_extension_list), files)
+            )
         for file in files:
             file_names.append(os.path.join(root, file))
     print(f"Found {len(file_names)} files with extension {file_extension or file_extension_list} in {folder_path}.")

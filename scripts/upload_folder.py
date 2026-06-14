@@ -18,7 +18,6 @@ args = parser.parse_args()
 read_photos = False
 print(f"Using folder: {args.folders or args.folder or args.sync_folder}")
 
-
 if args.sync_folder:
     fs = FlickrSync(api_key=args.api_key, api_secret=args.api_secret, number_of_sets=500, read_photos=True, limit=1)
 
@@ -27,7 +26,11 @@ if args.sync_folder:
     files = FolderToSync(folder_path=folder_path, upload_failed=args.upload_failed)
     files_to_upload: list[str] = []
     for on_disk_key, on_disk_value in files.file_names.items():
-        if on_disk_key not in fs.all_photos_title:
+        first_set = on_disk_value.sets[0]
+        try:
+            fs.all_photos_title_by_set.get(first_set, []).index(on_disk_key)
+            print(f"File {on_disk_key} already exists in Flickr in set {first_set}, skipping upload.")
+        except ValueError:
             files_to_upload.append(on_disk_value)
     print(f"Number of files not in Flickr: {len(files_to_upload)}")
     fs.upload_photos_parallel(files=files_to_upload, cnt=10)
@@ -60,4 +63,4 @@ elif args.folders:
             files_to_upload.append(on_disk_value)
     print(f"Number of files in folders: {len(files_to_upload)}")
     fs = FlickrSync(api_key=args.api_key, api_secret=args.api_secret, number_of_sets=411, read_photos=read_photos, limit=11)
-    fs.upload_photos_parallel(files=files_to_upload, cnt=15)
+    fs.upload_photos_parallel(files=files_to_upload, cnt=20)

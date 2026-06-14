@@ -59,7 +59,6 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python organize_by_date.py <folder_path>")
         print("Example: python organize_by_date.py ./my_downloads")
-        # sys.exit(1)
 
-    folder = "/Users/trenyikadam/Documents/Kepek"
+    folder = os.environ.get("ORGANIZE_FOLDER", sys.argv[1] if len(sys.argv) > 1 else None)
     organize_files_by_date(folder)
