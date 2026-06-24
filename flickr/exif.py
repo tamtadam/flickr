@@ -272,18 +272,19 @@ class MyExif:
             existing_data = self._exiftool_helper.execute_json(str(path))
             existing_tags = existing_data[0] if existing_data else {}
 
-            # Write tags (skip already set unless overwrite is enabled)
-            tags_to_write = {}
+            # Build tag arguments for exiftool
+            tag_args = []
             for tag, value in self.lens.to_exiftool_dict().items():
                 if tag not in existing_tags or not existing_tags[tag]:
-                    tags_to_write[tag] = value
+                    tag_args.append(f"-{tag}={value}")
                 elif self.overwrite:
-                    tags_to_write[tag] = value
+                    tag_args.append(f"-{tag}={value}")
                 else:
                     print(f"[EXIF] skip {tag} on {path.name}: already set to {existing_tags[tag]}")
 
-            if tags_to_write:
-                self._exiftool_helper.set_tags([str(path)], tags=tags_to_write, params=["-overwrite_original"])
+            # Write tags if there are any to write
+            if tag_args:
+                self._exiftool_helper.execute(*tag_args, "-overwrite_original", str(path))
             return True
         except Exception as e:
             print(f"[EXIF] exiftool failed for {path}: {type(e).__name__}: {_short_error(e)}")
