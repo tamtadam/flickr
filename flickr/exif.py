@@ -220,14 +220,20 @@ class MyExif:
         if not ok:
             return None
 
-        if not self.move_up:
-            return str(path)
+        # Move file if needed
+        final_path = path
+        if self.move_up:
+            try:
+                final_path = Path(self._move_up(path))
+            except Exception as e:
+                print(f"[EXIF] EXIF written but move failed for {path}: {type(e).__name__}: {_short_error(e)}")
+                return None
 
-        try:
-            return self._move_up(path)
-        except Exception as e:
-            print(f"[EXIF] EXIF written but move failed for {path}: {type(e).__name__}: {_short_error(e)}")
+        # Verify written tags
+        if not self._verify_written_tags(final_path):
             return None
+
+        return str(final_path)
 
     def _write_with_exif_lib(self, path: Path) -> bool:
         try:
@@ -282,6 +288,33 @@ class MyExif:
         except Exception as e:
             print(f"[EXIF] exiftool failed for {path}: {type(e).__name__}: {_short_error(e)}")
             return False
+
+    def _verify_written_tags(self, path: Path) -> bool:
+        """Verify that lens tags were written correctly to file.
+
+        Compares expected (from self.lens) vs actual (read from file) values.
+        Logs errors if mismatch found.
+        """
+        actual = self.read_lens_tags(str(path), self._exiftool_helper)
+        expected = self.lens.to_exiftool_dict()
+
+        errors = []
+        for tag_obj in ExiftoolTag:
+            exif_tag_name = tag_obj.value
+            expected_value = expected.get(exif_tag_name)
+            actual_value = actual.get(tag_obj.name)
+
+            if expected_value is not None:
+                if str(actual_value) != str(expected_value):
+                    errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
+
+        if errors:
+            print(f"[EXIF] Verification failed for {path.name}:")
+            for error in errors:
+                print(f"  - {error}")
+            return False
+
+        return True
 
     @staticmethod
     def delete_lens_tags(file_path: str) -> bool:
