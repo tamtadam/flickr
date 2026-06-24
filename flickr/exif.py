@@ -353,10 +353,11 @@ class MyExif:
         return None
 
     @staticmethod
-    def read_lens_tags(file_path: str) -> dict[str, Optional[str]]:
+    def read_lens_tags(file_path: str, exiftool_helper: Optional[object] = None) -> dict[str, Optional[str]]:
         """Read all lens-related EXIF tags from a file.
 
         Returns a dictionary mapping tag names to their values.
+        If exiftool_helper is provided, uses it instead of creating a new session.
         """
         path = Path(file_path)
         result = {tag.name: None for tag in ExiftoolTag}
@@ -376,7 +377,8 @@ class MyExif:
         # Try with exiftool for raw/video/others or if exif lib didn't work
         try:
             import exiftool
-            with exiftool.ExifToolHelper() as exiftool_helper:
+            if exiftool_helper is not None:
+                # Use provided session (important for ARW to read freshly written data)
                 tags_list = exiftool_helper.execute_json(str(path))
                 if tags_list:
                     tag_dict = tags_list[0]
@@ -385,6 +387,17 @@ class MyExif:
                             value = tag_dict.get(tag.value)
                             if value is not None:
                                 result[tag.name] = str(value)
+            else:
+                # Create new session if not provided
+                with exiftool.ExifToolHelper() as helper:
+                    tags_list = helper.execute_json(str(path))
+                    if tags_list:
+                        tag_dict = tags_list[0]
+                        for tag in ExiftoolTag:
+                            if result[tag.name] is None:  # Don't overwrite exif lib values
+                                value = tag_dict.get(tag.value)
+                                if value is not None:
+                                    result[tag.name] = str(value)
         except ImportError:
             pass
         except Exception:
@@ -405,17 +418,31 @@ class MyExif:
             print(f"Error: '{folder_path}' is not a directory")
             return
 
-        image_files = [f for f in path.iterdir() if f.is_file() and f.suffix in IMAGE_EXTENSIONS]
+        # Collect image files (including subdirectories)
+        image_files = []
+        for root, _, files in os.walk(path):
+            for name in files:
+                if name.endswith(IMAGE_EXTENSIONS):
+                    image_files.append(Path(root) / name)
 
         if not image_files:
             print(f"No image files found in '{folder_path}'")
             return
 
-        # Collect all data
-        table_data = []
-        for file_path in sorted(image_files):
-            tags = MyExif.read_lens_tags(str(file_path))
-            table_data.append((file_path.name, tags))
+        # Use a single exiftool session for all reads (important for ARW files)
+        try:
+            import exiftool
+            with exiftool.ExifToolHelper() as exiftool_helper:
+                table_data = []
+                for file_path in sorted(image_files):
+                    tags = MyExif.read_lens_tags(str(file_path), exiftool_helper)
+                    table_data.append((file_path.name, tags))
+        except ImportError:
+            # Fallback without exiftool
+            table_data = []
+            for file_path in sorted(image_files):
+                tags = MyExif.read_lens_tags(str(file_path))
+                table_data.append((file_path.name, tags))
 
         # Print header
         tag_names = [tag.name for tag in ExiftoolTag]
