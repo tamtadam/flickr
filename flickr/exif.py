@@ -294,8 +294,9 @@ class MyExif:
 
         Compares expected (from self.lens) vs actual (read from file) values.
         Logs errors if mismatch found.
+        Uses fresh exiftool session to avoid caching issues from write session.
         """
-        actual = self.read_lens_tags(str(path), self._exiftool_helper)
+        actual = self.read_lens_tags(str(path), exiftool_helper=None)
         expected = self.lens.to_exiftool_dict()
 
         errors = []
