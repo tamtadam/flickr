@@ -61,7 +61,7 @@ class App:
         self.action = tk.StringVar(value="Feltöltés")
         ttk.Combobox(
             top, textvariable=self.action, state="readonly",
-            values=["Feltöltés", "Szinkronizálás", "Objektív EXIF", "Rendezés dátum szerint"], width=30,
+            values=["Feltöltés", "Szinkronizálás", "Objektív EXIF", "Objektív EXIF lekérés", "Rendezés dátum szerint"], width=30,
         ).grid(row=1, column=1, sticky="w", pady=4)
         self.action.trace_add("write", self._rebuild_params)
 
@@ -98,6 +98,8 @@ class App:
             self._build_upload_params(self.params_frame)
         elif act == "Objektív EXIF":
             self._build_exif_params(self.params_frame)
+        elif act == "Objektív EXIF lekérés":
+            self._build_query_params(self.params_frame)
         elif act == "Rendezés dátum szerint":
             self._build_organize_params(self.params_frame)
 
@@ -141,6 +143,9 @@ class App:
     def _build_organize_params(self, parent: ttk.Frame) -> None:
         pass  # No additional parameters needed for organize
 
+    def _build_query_params(self, _: ttk.Frame) -> None:
+        pass  # No additional parameters needed for query
+
     def _run(self) -> None:
         paths = [self.listbox.get(i).strip() for i in range(self.listbox.size()) if self.listbox.get(i).strip()]
         if not paths:
@@ -183,6 +188,11 @@ class App:
                 self._run_in_background("EXIF (auto)", _run_auto_exif, paths[0], move_up, overwrite, delete_tags, write_exif)
             else:
                 self._run_in_background(f"EXIF ({lens_key})", _run_single_lens_exif, paths[0], lens_key, move_up, overwrite, delete_tags, write_exif)
+
+        elif act == "Objektív EXIF lekérés":
+            if len(paths) > 1:
+                self._append("Figyelem: lekéréshez csak az első mappa kerül feldolgozásra.\n")
+            self._run_in_background("Objektív EXIF lekérés", _query_lens_tags, paths[0])
 
         elif act == "Rendezés dátum szerint":
             if len(paths) > 1:
@@ -269,6 +279,11 @@ def _delete_tags_recursively(folder: str) -> None:
                     print(f"[EXIF] Deleted tags from: {name}")
                     deleted_count += 1
     print(f"[EXIF] Successfully deleted lens tags from {deleted_count} file(s).")
+
+
+def _query_lens_tags(folder: str) -> None:
+    """Query and display lens metadata for all images in a folder."""
+    MyExif.print_lens_tags_table(folder)
 
 
 def main() -> None:

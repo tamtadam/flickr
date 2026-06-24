@@ -353,6 +353,102 @@ class MyExif:
         return None
 
     @staticmethod
+    def read_lens_tags(file_path: str) -> dict[str, Optional[str]]:
+        """Read all lens-related EXIF tags from a file.
+
+        Returns a dictionary mapping tag names to their values.
+        """
+        path = Path(file_path)
+        result = {tag.name: None for tag in ExiftoolTag}
+
+        # Try JPEG with exif library
+        if path.suffix in JPEG_EXTENSIONS:
+            try:
+                with open(path, "rb") as f:
+                    img = Image(f)
+                for tag in ExiftoolTag:
+                    value = img.get(tag.name.lower())
+                    if value is not None:
+                        result[tag.name] = str(value)
+            except Exception:
+                pass
+
+        # Try with exiftool for raw/video/others or if exif lib didn't work
+        try:
+            import exiftool
+            with exiftool.ExifToolHelper() as exiftool_helper:
+                tags_list = exiftool_helper.execute_json(str(path))
+                if tags_list:
+                    tag_dict = tags_list[0]
+                    for tag in ExiftoolTag:
+                        if result[tag.name] is None:  # Don't overwrite exif lib values
+                            value = tag_dict.get(tag.value)
+                            if value is not None:
+                                result[tag.name] = str(value)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        return result
+
+    @staticmethod
+    def print_lens_tags_table(folder_path: str) -> None:
+        """Print lens metadata for all images in a folder in table format."""
+        path = Path(folder_path)
+
+        if not path.exists():
+            print(f"Error: Folder '{folder_path}' does not exist")
+            return
+
+        if not path.is_dir():
+            print(f"Error: '{folder_path}' is not a directory")
+            return
+
+        image_files = [f for f in path.iterdir() if f.is_file() and f.suffix in IMAGE_EXTENSIONS]
+
+        if not image_files:
+            print(f"No image files found in '{folder_path}'")
+            return
+
+        # Collect all data
+        table_data = []
+        for file_path in sorted(image_files):
+            tags = MyExif.read_lens_tags(str(file_path))
+            table_data.append((file_path.name, tags))
+
+        # Print header
+        tag_names = [tag.name for tag in ExiftoolTag]
+        header_parts = ["Fájl"] + tag_names
+
+        # Calculate column widths
+        col_widths = [max(len(header_parts[0]), max((len(row[0]) for row in table_data), default=0))]
+        for tag_name in tag_names:
+            max_width = len(tag_name)
+            for _, tags in table_data:
+                value = tags.get(tag_name)
+                if value:
+                    max_width = max(max_width, len(value))
+            col_widths.append(max_width)
+
+        # Print header
+        header = " | ".join(
+            header_parts[i].ljust(col_widths[i]) for i in range(len(header_parts))
+        )
+        print(header)
+        print("-" * len(header))
+
+        # Print rows
+        for file_name, tags in table_data:
+            row_parts = [file_name] + [tags.get(tag_name) or "-" for tag_name in tag_names]
+            row = " | ".join(
+                row_parts[i].ljust(col_widths[i]) for i in range(len(row_parts))
+            )
+            print(row)
+
+        print(f"\nÖsszesen: {len(table_data)} fájl")
+
+    @staticmethod
     def _move_up(path: Path) -> str:
         dest = path.parent.parent / path.name
         if dest.exists():
