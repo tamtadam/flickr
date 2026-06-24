@@ -17,6 +17,7 @@ IMAGE_EXTENSIONS = JPEG_EXTENSIONS + EXIFTOOL_EXTENSIONS
 
 class ExiftoolTag(str, Enum):
     """Exiftool tag names for lens metadata."""
+
     LENS_MAKE = "LensMake"
     LENS_MODEL = "LensModel"
     FOCAL_LENGTH = "FocalLength"
@@ -275,12 +276,14 @@ class MyExif:
             # Build tag arguments for exiftool
             tag_args = []
             for tag, value in self.lens.to_exiftool_dict().items():
-                if tag not in existing_tags or not existing_tags[tag]:
+                # exiftool returns tags with EXIF: prefix in execute_json output
+                existing_tag_key = f"EXIF:{tag}"
+                if existing_tag_key not in existing_tags or not existing_tags[existing_tag_key]:
                     tag_args.append(f"-{tag}={value}")
                 elif self.overwrite:
                     tag_args.append(f"-{tag}={value}")
                 else:
-                    print(f"[EXIF] skip {tag} on {path.name}: already set to {existing_tags[tag]}")
+                    print(f"[EXIF] skip {tag} on {path.name}: already set to {existing_tags[existing_tag_key]}")
 
             # Write tags if there are any to write
             if tag_args:
@@ -326,6 +329,7 @@ class MyExif:
         """
         try:
             import exiftool
+
             with exiftool.ExifToolHelper() as exiftool_helper:
                 # Build list of tags to delete with exiftool syntax (use = to actually clear them)
                 tags_to_delete = [f"-{tag.value}=" for tag in ExiftoolTag]
@@ -361,17 +365,18 @@ class MyExif:
         # Try with exiftool for raw/video/others
         try:
             import exiftool
+
             with exiftool.ExifToolHelper() as exiftool_helper:
                 tags_list = exiftool_helper.execute_json(str(path))
                 if not tags_list:
                     return None
                 tag_dict = tags_list[0]
-                # Try common datetime tags
+                # Try common datetime tags (exiftool returns with EXIF: prefix)
                 dt_str = (
-                    tag_dict.get("DateTimeOriginal") or
-                    tag_dict.get("CreateDate") or
-                    tag_dict.get("ModifyDate") or
-                    tag_dict.get("CreationTime")
+                    tag_dict.get("EXIF:DateTimeOriginal")
+                    or tag_dict.get("EXIF:CreateDate")
+                    or tag_dict.get("EXIF:ModifyDate")
+                    or tag_dict.get("EXIF:CreationTime")
                 )
                 if dt_str:
                     # Handle different datetime formats
@@ -427,7 +432,8 @@ class MyExif:
                 if tags_list:
                     tag_dict = tags_list[0]
                     for tag in ExiftoolTag:
-                        value = tag_dict.get(tag.value)
+                        # exiftool returns tags with EXIF: prefix
+                        value = tag_dict.get(f"EXIF:{tag.value}")
                         if value is not None:
                             result[tag.name] = str(value)
             finally:
@@ -467,6 +473,7 @@ class MyExif:
         # Use a single exiftool session for all reads (important for ARW files)
         try:
             import exiftool
+
             with exiftool.ExifToolHelper() as exiftool_helper:
                 table_data = []
                 for file_path in sorted(image_files):
@@ -494,18 +501,14 @@ class MyExif:
             col_widths.append(max_width)
 
         # Print header
-        header = " | ".join(
-            header_parts[i].ljust(col_widths[i]) for i in range(len(header_parts))
-        )
+        header = " | ".join(header_parts[i].ljust(col_widths[i]) for i in range(len(header_parts)))
         print(header)
         print("-" * len(header))
 
         # Print rows
         for file_name, tags in table_data:
             row_parts = [file_name] + [tags.get(tag_name) or "-" for tag_name in tag_names]
-            row = " | ".join(
-                row_parts[i].ljust(col_widths[i]) for i in range(len(row_parts))
-            )
+            row = " | ".join(row_parts[i].ljust(col_widths[i]) for i in range(len(row_parts)))
             print(row)
 
         print(f"\nÖsszesen: {len(table_data)} fájl")
