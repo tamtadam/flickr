@@ -378,8 +378,16 @@ class MyExif:
         # Use exiftool for raw/video/others or if JPEG exif lib failed
         try:
             import exiftool
-            if exiftool_helper is not None:
-                # Use provided session (important for ARW to read freshly written data)
+
+            # Setup helper: use provided or create new
+            if exiftool_helper is None:
+                exiftool_helper = exiftool.ExifToolHelper()
+                exiftool_helper.__enter__()
+                should_close = True
+            else:
+                should_close = False
+
+            try:
                 tags_list = exiftool_helper.execute_json(str(path))
                 if tags_list:
                     tag_dict = tags_list[0]
@@ -387,16 +395,9 @@ class MyExif:
                         value = tag_dict.get(tag.value)
                         if value is not None:
                             result[tag.name] = str(value)
-            else:
-                # Create new session if not provided (for non-JPEG files)
-                with exiftool.ExifToolHelper() as helper:
-                    tags_list = helper.execute_json(str(path))
-                    if tags_list:
-                        tag_dict = tags_list[0]
-                        for tag in ExiftoolTag:
-                            value = tag_dict.get(tag.value)
-                            if value is not None:
-                                result[tag.name] = str(value)
+            finally:
+                if should_close:
+                    exiftool_helper.__exit__(None, None, None)
         except ImportError:
             pass
         except Exception:
