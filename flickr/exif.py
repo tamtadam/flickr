@@ -357,12 +357,12 @@ class MyExif:
         """Read all lens-related EXIF tags from a file.
 
         Returns a dictionary mapping tag names to their values.
-        If exiftool_helper is provided, uses it instead of creating a new session.
+        If exiftool_helper is provided, uses it for raw/video files (for freshly written data).
         """
         path = Path(file_path)
         result = {tag.name: None for tag in ExiftoolTag}
 
-        # Try JPEG with exif library
+        # Try JPEG with exif library first
         if path.suffix in JPEG_EXTENSIONS:
             try:
                 with open(path, "rb") as f:
@@ -371,10 +371,11 @@ class MyExif:
                     value = img.get(tag.name.lower())
                     if value is not None:
                         result[tag.name] = str(value)
+                return result  # Return early if JPEG was processed successfully
             except Exception:
-                pass
+                pass  # Fall through to exiftool if exif lib fails
 
-        # Try with exiftool for raw/video/others or if exif lib didn't work
+        # Use exiftool for raw/video/others or if JPEG exif lib failed
         try:
             import exiftool
             if exiftool_helper is not None:
@@ -383,21 +384,19 @@ class MyExif:
                 if tags_list:
                     tag_dict = tags_list[0]
                     for tag in ExiftoolTag:
-                        if result[tag.name] is None:  # Don't overwrite exif lib values
-                            value = tag_dict.get(tag.value)
-                            if value is not None:
-                                result[tag.name] = str(value)
+                        value = tag_dict.get(tag.value)
+                        if value is not None:
+                            result[tag.name] = str(value)
             else:
-                # Create new session if not provided
+                # Create new session if not provided (for non-JPEG files)
                 with exiftool.ExifToolHelper() as helper:
                     tags_list = helper.execute_json(str(path))
                     if tags_list:
                         tag_dict = tags_list[0]
                         for tag in ExiftoolTag:
-                            if result[tag.name] is None:  # Don't overwrite exif lib values
-                                value = tag_dict.get(tag.value)
-                                if value is not None:
-                                    result[tag.name] = str(value)
+                            value = tag_dict.get(tag.value)
+                            if value is not None:
+                                result[tag.name] = str(value)
         except ImportError:
             pass
         except Exception:
