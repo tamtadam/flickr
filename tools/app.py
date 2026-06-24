@@ -4,11 +4,12 @@ import threading
 import tkinter as tk
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from tkinter import filedialog, ttk
 
 from flickr.exif import LENSES, MyExif
 from flickr.organize import organize_files_by_date
-from flickr.upload_folder import sync_folder, upload_multiple_folders, upload_single_folder
+from flickr.upload_folder import UPLOAD_ROOT, sync_folder, upload_multiple_folders, upload_single_folder
 
 
 class QueueWriter:
@@ -32,59 +33,161 @@ class App:
 
         self.output_queue: queue.Queue[str] = queue.Queue()
         self.worker: threading.Thread | None = None
+        self.action_params: dict = {}
+
+        self.upload_root = tk.StringVar(value=os.environ.get("UPLOAD_ROOT", UPLOAD_ROOT or os.path.expanduser("~")))
 
         self._build_layout()
-        self._show_form(self._build_upload_form, "Feltöltés")
         self.root.after(100, self._drain_output)
 
-    # ---------- layout ----------
     def _build_layout(self) -> None:
         outer = ttk.Frame(self.root, padding=8)
         outer.pack(fill="both", expand=True)
 
-        top = ttk.Frame(outer)
-        top.pack(fill="both", expand=True)
+        top = ttk.LabelFrame(outer, text="Paraméterek", padding=12)
+        top.pack(fill="x")
+        top.columnconfigure(1, weight=1)
 
-        sidebar = ttk.Frame(top, padding=(0, 0, 8, 0))
-        sidebar.pack(side="left", fill="y")
+        ttk.Label(top, text="Mappák:").grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=4)
+        self.listbox = tk.Listbox(top, height=5, selectmode="extended")
+        self.listbox.grid(row=0, column=1, sticky="we", pady=4)
 
-        self._make_sidebar_button(sidebar, "Feltöltés", self._build_upload_form)
-        self._make_sidebar_button(sidebar, "Objektív EXIF", self._build_exif_form)
-        self._make_sidebar_button(sidebar, "Rendezés dátum szerint", self._build_organize_form)
+        btns = ttk.Frame(top)
+        btns.grid(row=0, column=2, sticky="n", padx=(8, 0))
+        ttk.Button(btns, text="Hozzáadás…", command=self._add_folder).pack(fill="x")
+        ttk.Button(btns, text="Eltávolítás", command=self._remove_folder).pack(fill="x", pady=(4, 0))
 
-        self.form_container = ttk.LabelFrame(top, text="Paraméterek", padding=12)
-        self.form_container.pack(side="left", fill="both", expand=True)
+        ttk.Label(top, text="Akció:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        self.action = tk.StringVar(value="Feltöltés")
+        ttk.Combobox(
+            top, textvariable=self.action, state="readonly",
+            values=["Feltöltés", "Szinkronizálás", "Objektív EXIF", "Rendezés dátum szerint"], width=30,
+        ).grid(row=1, column=1, sticky="w", pady=4)
+        self.action.trace_add("write", self._rebuild_params)
+
+        self.params_frame = ttk.Frame(top)
+        self.params_frame.grid(row=2, column=0, columnspan=3, sticky="we")
+        self.params_frame.columnconfigure(1, weight=1)
+        self._rebuild_params()
+
+        ttk.Button(top, text="Futtatás", command=self._run).grid(row=3, column=1, sticky="e", pady=(8, 0))
 
         bottom = ttk.LabelFrame(outer, text="Kimenet", padding=4)
         bottom.pack(fill="both", expand=True, pady=(8, 0))
-
         self.output = tk.Text(bottom, wrap="word", height=14, bg="#1e1e1e", fg="#dcdcdc", insertbackground="#dcdcdc")
         self.output.pack(side="left", fill="both", expand=True)
         scroll = ttk.Scrollbar(bottom, command=self.output.yview)
         scroll.pack(side="right", fill="y")
         self.output.configure(yscrollcommand=scroll.set)
 
-    def _make_sidebar_button(self, parent: ttk.Frame, label: str, builder) -> None:
-        btn = ttk.Button(parent, text=label, width=24, command=lambda: self._show_form(builder, label))
-        btn.pack(pady=4, anchor="n")
+    def _add_folder(self) -> None:
+        p = filedialog.askdirectory(initialdir=self.upload_root.get() or os.path.expanduser("~"))
+        if p:
+            self.listbox.insert("end", p)
 
-    def _show_form(self, builder, label: str) -> None:
-        self.form_container.config(text=label)
-        for w in self.form_container.winfo_children():
+    def _remove_folder(self) -> None:
+        for i in reversed(self.listbox.curselection()):
+            self.listbox.delete(i)
+
+    def _rebuild_params(self, *_: object) -> None:
+        for w in self.params_frame.winfo_children():
             w.destroy()
-        builder(self.form_container)
+        self.action_params = {}
+        act = self.action.get()
+        if act in ("Feltöltés", "Szinkronizálás"):
+            self._build_upload_params(self.params_frame)
+        elif act == "Objektív EXIF":
+            self._build_exif_params(self.params_frame)
+        elif act == "Rendezés dátum szerint":
+            self._build_organize_params(self.params_frame)
 
-    # ---------- form helpers ----------
-    @staticmethod
-    def _row(parent, label_text: str, row: int) -> None:
-        ttk.Label(parent, text=label_text).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+    def _build_upload_params(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="Alapmappa:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Entry(parent, textvariable=self.upload_root, width=60).grid(row=0, column=1, sticky="we", pady=4)
+        ttk.Button(parent, text="Tallózás…", command=lambda: self._pick_folder(self.upload_root)).grid(row=0, column=2, padx=(8, 0), pady=4)
 
-    def _single_folder_picker(self, parent, row: int) -> tk.StringVar:
-        var = tk.StringVar()
-        ttk.Entry(parent, textvariable=var, width=60).grid(row=row, column=1, sticky="we", pady=4)
-        ttk.Button(parent, text="Tallózás…", command=lambda: self._pick_folder(var)).grid(row=row, column=2, padx=(8, 0), pady=4)
-        parent.columnconfigure(1, weight=1)
-        return var
+        ttk.Label(parent, text="API key:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        api_key = tk.StringVar(value=os.environ.get("FLICKR_API_KEY", ""))
+        ttk.Entry(parent, textvariable=api_key, width=60).grid(row=1, column=1, sticky="we", pady=4)
+
+        ttk.Label(parent, text="API secret:").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=4)
+        api_secret = tk.StringVar(value=os.environ.get("FLICKR_API_SECRET", ""))
+        ttk.Entry(parent, textvariable=api_secret, width=60, show="•").grid(row=2, column=1, sticky="we", pady=4)
+
+        ttk.Label(parent, text="Év set:").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=4)
+        year_set = tk.StringVar(value="__2026__")
+        ttk.Entry(parent, textvariable=year_set, width=20).grid(row=3, column=1, sticky="w", pady=4)
+
+        upload_failed = tk.IntVar(value=0)
+        ttk.Checkbutton(parent, text="FAILED mappa újrapróbálása", variable=upload_failed).grid(row=4, column=1, sticky="w", pady=4)
+
+        self.action_params = {"api_key": api_key, "api_secret": api_secret, "upload_failed": upload_failed, "year_set": year_set}
+
+    def _build_exif_params(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="Objektív:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
+        lens = tk.StringVar(value="auto")
+        ttk.Combobox(parent, textvariable=lens, state="readonly",
+                     values=["auto"] + sorted(LENSES.keys()), width=30).grid(row=0, column=1, sticky="w", pady=4)
+        move_up = tk.IntVar(value=1)
+        ttk.Checkbutton(parent, text="Fájlok mozgatása egy mappával felfelé", variable=move_up).grid(row=1, column=1, sticky="w", pady=4)
+        overwrite = tk.IntVar(value=0)
+        ttk.Checkbutton(parent, text="EXIF felülírása (ha már létezik)", variable=overwrite).grid(row=2, column=1, sticky="w", pady=4)
+        delete_tags = tk.IntVar(value=0)
+        ttk.Checkbutton(parent, text="Meglévő objektív tag-ek törlése", variable=delete_tags).grid(row=3, column=1, sticky="w", pady=4)
+        write_exif = tk.IntVar(value=1)
+        ttk.Checkbutton(parent, text="EXIF írása", variable=write_exif).grid(row=4, column=1, sticky="w", pady=4)
+        self.action_params = {"lens": lens, "move_up": move_up, "overwrite": overwrite, "delete_tags": delete_tags, "write_exif": write_exif}
+
+    def _build_organize_params(self, parent: ttk.Frame) -> None:
+        pass  # No additional parameters needed for organize
+
+    def _run(self) -> None:
+        paths = [self.listbox.get(i).strip() for i in range(self.listbox.size()) if self.listbox.get(i).strip()]
+        if not paths:
+            self._append("Hiba: adj meg legalább egy mappát.\n")
+            return
+
+        act = self.action.get()
+        p = self.action_params
+
+        if act == "Feltöltés":
+            ak = p["api_key"].get().strip()
+            asec = p["api_secret"].get().strip()
+            uf = bool(p["upload_failed"].get())
+            ur = self.upload_root.get().strip() or "/"
+            ys = p["year_set"].get().strip() or "__2026__"
+            names = [os.path.basename(path) for path in paths]
+            if len(names) == 1:
+                self._run_in_background("Feltöltés", upload_single_folder, names[0], ak, asec, uf, ur, ys)
+            else:
+                self._run_in_background("Feltöltés (több mappa)", upload_multiple_folders, names, ak, asec, uf, ur, ys)
+
+        elif act == "Szinkronizálás":
+            ak = p["api_key"].get().strip()
+            asec = p["api_secret"].get().strip()
+            uf = bool(p["upload_failed"].get())
+            ys = p["year_set"].get().strip() or "__2026__"
+            if len(paths) > 1:
+                self._append("Figyelem: szinkronizáláshoz csak az első mappa kerül feldolgozásra.\n")
+            self._run_in_background("Szinkronizálás", sync_folder, paths[0], ak, asec, uf, ys)
+
+        elif act == "Objektív EXIF":
+            lens_key = p["lens"].get()
+            move_up = bool(p["move_up"].get())
+            overwrite = bool(p["overwrite"].get())
+            delete_tags = bool(p["delete_tags"].get())
+            write_exif = bool(p["write_exif"].get())
+            if len(paths) > 1:
+                self._append("Figyelem: EXIF átíráshoz csak az első mappa kerül feldolgozásra.\n")
+            if lens_key == "auto":
+                self._run_in_background("EXIF (auto)", _run_auto_exif, paths[0], move_up, overwrite, delete_tags, write_exif)
+            else:
+                self._run_in_background(f"EXIF ({lens_key})", _run_single_lens_exif, paths[0], lens_key, move_up, overwrite, delete_tags, write_exif)
+
+        elif act == "Rendezés dátum szerint":
+            if len(paths) > 1:
+                self._append("Figyelem: rendezéshez csak az első mappa kerül feldolgozásra.\n")
+            self._run_in_background("Rendezés dátum szerint", organize_files_by_date, paths[0])
 
     @staticmethod
     def _pick_folder(var: tk.StringVar) -> None:
@@ -92,125 +195,6 @@ class App:
         if path:
             var.set(path)
 
-    # ---------- forms ----------
-    def _build_upload_form(self, parent: ttk.Frame) -> None:
-        self._row(parent, "Mód:", 0)
-        mode = tk.StringVar(value="folder")
-        ttk.Combobox(parent, textvariable=mode, state="readonly",
-                     values=["folder", "folders", "sync_folder"], width=30).grid(row=0, column=1, sticky="w", pady=4)
-
-        folder_area = ttk.Frame(parent)
-        folder_area.grid(row=1, column=0, columnspan=3, sticky="we", pady=4)
-        parent.columnconfigure(1, weight=1)
-
-        state: dict = {}
-
-        def rebuild_folder_area(*_) -> None:
-            for w in folder_area.winfo_children():
-                w.destroy()
-            if mode.get() == "folders":
-                ttk.Label(folder_area, text="Mappák:").grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=4)
-                listbox = tk.Listbox(folder_area, height=6, selectmode="extended")
-                listbox.grid(row=0, column=1, sticky="we", pady=4)
-                folder_area.columnconfigure(1, weight=1)
-                btns = ttk.Frame(folder_area)
-                btns.grid(row=0, column=2, sticky="n", padx=(8, 0))
-
-                def _add() -> None:
-                    p = filedialog.askdirectory()
-                    if p:
-                        listbox.insert("end", p)
-
-                def _remove() -> None:
-                    for i in reversed(listbox.curselection()):
-                        listbox.delete(i)
-
-                ttk.Button(btns, text="Hozzáadás…", command=_add).pack(fill="x")
-                ttk.Button(btns, text="Eltávolítás", command=_remove).pack(fill="x", pady=(4, 0))
-                state["kind"] = "multi"
-                state["listbox"] = listbox
-            else:
-                ttk.Label(folder_area, text="Mappa:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
-                var = tk.StringVar()
-                ttk.Entry(folder_area, textvariable=var).grid(row=0, column=1, sticky="we", pady=4)
-                folder_area.columnconfigure(1, weight=1)
-                ttk.Button(folder_area, text="Tallózás…", command=lambda: self._pick_folder(var)).grid(row=0, column=2, padx=(8, 0))
-                state["kind"] = "single"
-                state["var"] = var
-
-        mode.trace_add("write", rebuild_folder_area)
-        rebuild_folder_area()
-
-        self._row(parent, "API key:", 2)
-        api_key = tk.StringVar(value=os.environ.get("FLICKR_API_KEY", ""))
-        ttk.Entry(parent, textvariable=api_key, width=60).grid(row=2, column=1, sticky="we", pady=4)
-
-        self._row(parent, "API secret:", 3)
-        api_secret = tk.StringVar(value=os.environ.get("FLICKR_API_SECRET", ""))
-        ttk.Entry(parent, textvariable=api_secret, width=60, show="•").grid(row=3, column=1, sticky="we", pady=4)
-
-        upload_failed = tk.IntVar(value=0)
-        ttk.Checkbutton(parent, text="FAILED mappa újrapróbálása", variable=upload_failed).grid(row=4, column=1, sticky="w", pady=4)
-
-        def run() -> None:
-            ak = api_key.get().strip()
-            asec = api_secret.get().strip()
-            uf = bool(upload_failed.get())
-            if state["kind"] == "multi":
-                lb = state["listbox"]
-                paths = [lb.get(i).strip() for i in range(lb.size()) if lb.get(i).strip()]
-                if not paths:
-                    self._append("Hiba: adj meg legalább egy mappát.\n")
-                    return
-                self._run_in_background("Feltöltés (folders)", upload_multiple_folders, paths, ak, asec, uf)
-            else:
-                folder_value = state["var"].get().strip()
-                if not folder_value:
-                    self._append("Hiba: válassz mappát.\n")
-                    return
-                if mode.get() == "folder":
-                    self._run_in_background("Feltöltés (folder)", upload_single_folder, folder_value, ak, asec, uf)
-                else:
-                    self._run_in_background("Feltöltés (sync)", sync_folder, folder_value, ak, asec, uf)
-
-        ttk.Button(parent, text="Futtatás", command=run).grid(row=5, column=1, sticky="e", pady=(16, 0))
-
-    def _build_exif_form(self, parent: ttk.Frame) -> None:
-        self._row(parent, "Mappa:", 0)
-        folder = self._single_folder_picker(parent, 0)
-
-        self._row(parent, "Objektív:", 1)
-        lens = tk.StringVar(value="auto")
-        values = ["auto"] + sorted(LENSES.keys())
-        ttk.Combobox(parent, textvariable=lens, state="readonly", values=values, width=30).grid(row=1, column=1, sticky="w", pady=4)
-
-        def run() -> None:
-            folder_value = folder.get().strip()
-            if not folder_value:
-                self._append("Hiba: válassz mappát.\n")
-                return
-            lens_key = lens.get()
-            if lens_key == "auto":
-                self._run_in_background("EXIF (auto)", _run_auto_exif, folder_value)
-            else:
-                self._run_in_background(f"EXIF ({lens_key})", _run_single_lens_exif, folder_value, lens_key)
-
-        ttk.Button(parent, text="Futtatás", command=run).grid(row=2, column=1, sticky="e", pady=(16, 0))
-
-    def _build_organize_form(self, parent: ttk.Frame) -> None:
-        self._row(parent, "Mappa:", 0)
-        folder = self._single_folder_picker(parent, 0)
-
-        def run() -> None:
-            folder_value = folder.get().strip()
-            if not folder_value:
-                self._append("Hiba: válassz mappát.\n")
-                return
-            self._run_in_background("Rendezés dátum szerint", organize_files_by_date, folder_value)
-
-        ttk.Button(parent, text="Futtatás", command=run).grid(row=1, column=1, sticky="e", pady=(16, 0))
-
-    # ---------- background runner ----------
     def _run_in_background(self, label: str, fn, *args, **kwargs) -> None:
         if self.worker and self.worker.is_alive():
             self._append("[FIGYELEM] Egy futás már zajlik, várd meg amíg befejeződik.\n")
@@ -244,17 +228,47 @@ class App:
         self.output.see("end")
 
 
-def _run_auto_exif(folder: str) -> None:
-    results = MyExif.apply_by_subfolder_names(folder)
-    total = sum(len(v) for v in results.values())
-    print(f"Done. {total} file(s) modified across {len(results)} subfolder(s).")
+def _run_auto_exif(folder: str, move_up: bool = True, overwrite: bool = False, delete_tags: bool = False, write_exif: bool = True) -> None:
+    if delete_tags:
+        print("[EXIF] Deleting existing lens tags before applying...")
+        _delete_tags_recursively(folder)
+    if write_exif:
+        results = MyExif.apply_by_subfolder_names(folder, move_up=move_up, overwrite=overwrite)
+        total = sum(len(v) for v in results.values())
+        action = "modified and moved one level up" if move_up else "modified"
+        print(f"Done. {total} file(s) {action} across {len(results)} subfolder(s).")
+    else:
+        print("[EXIF] EXIF writing disabled, only deletion performed.")
 
 
-def _run_single_lens_exif(folder: str, lens_key: str) -> None:
-    lens = LENSES[lens_key]
-    print(f"Applying '{lens.lens_model}' to folder: {folder}")
-    moved = MyExif(lens).apply_to_path(folder)
-    print(f"Done. {len(moved)} file(s) modified and moved one level up.")
+def _run_single_lens_exif(folder: str, lens_key: str, move_up: bool = True, overwrite: bool = False, delete_tags: bool = False, write_exif: bool = True) -> None:
+    if delete_tags:
+        print("[EXIF] Deleting existing lens tags before applying...")
+        _delete_tags_recursively(folder)
+    if write_exif:
+        lens = LENSES[lens_key]
+        print(f"Applying '{lens.lens_model}' to folder: {folder}")
+        moved = MyExif(lens, move_up=move_up, overwrite=overwrite).apply_to_path(folder)
+        action = "modified and moved one level up" if move_up else "modified"
+        print(f"Done. {len(moved)} file(s) {action}.")
+    else:
+        print("[EXIF] EXIF writing disabled, only deletion performed.")
+
+
+def _delete_tags_recursively(folder: str) -> None:
+    """Delete lens tags from all image files in a folder recursively."""
+    from flickr.exif import IMAGE_EXTENSIONS
+
+    folder_path = Path(folder)
+    deleted_count = 0
+    for root, _, files in os.walk(folder_path):
+        for name in files:
+            if name.endswith(IMAGE_EXTENSIONS):
+                file_path = os.path.join(root, name)
+                if MyExif.delete_lens_tags(file_path):
+                    print(f"[EXIF] Deleted tags from: {name}")
+                    deleted_count += 1
+    print(f"[EXIF] Successfully deleted lens tags from {deleted_count} file(s).")
 
 
 def main() -> None:

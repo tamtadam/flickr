@@ -2,6 +2,8 @@ import os
 import shutil
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field, fields
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
@@ -13,6 +15,17 @@ EXIFTOOL_EXTENSIONS = (".ARW", ".CR2", ".NEF", ".DNG", ".TIFF", ".PNG", ".GIF", 
 IMAGE_EXTENSIONS = JPEG_EXTENSIONS + EXIFTOOL_EXTENSIONS
 
 
+class ExiftoolTag(str, Enum):
+    """Exiftool tag names for lens metadata."""
+    LENS_MAKE = "LensMake"
+    LENS_MODEL = "LensModel"
+    FOCAL_LENGTH = "FocalLength"
+    F_NUMBER = "FNumber"
+    FOCAL_LENGTH_35MM = "FocalLengthIn35mmFormat"
+    LENS_INFO = "LensInfo"
+    MAX_APERTURE = "MaxApertureValue"
+
+
 def _short_error(e: Exception) -> str:
     lines = [ln.strip() for ln in str(e).splitlines() if ln.strip()]
     return lines[-1] if lines else type(e).__name__
@@ -20,29 +33,33 @@ def _short_error(e: Exception) -> str:
 
 @dataclass
 class Lens:
-    lens_make: Optional[str] = field(default=None, metadata={"exiftool": "LensMake"})
-    lens_model: Optional[str] = field(default=None, metadata={"exiftool": "LensModel"})
-    focal_length: Optional[float] = field(default=None, metadata={"exiftool": "FocalLength"})
-    f_number: Optional[float] = field(default=None, metadata={"exiftool": "FNumber"})
-    focal_length_in_35mm_film: Optional[int] = field(default=None, metadata={"exiftool": "FocalLengthIn35mmFormat"})
-    lens_specification: Optional[Tuple[float, float, float, float]] = field(default=None, metadata={"exiftool": "LensInfo"})
-    max_aperture_value: Optional[float] = field(default=None, metadata={"exiftool": "MaxApertureValue"})
+    lens_make: Optional[str] = field(default=None, metadata={"exiftool": ExiftoolTag.LENS_MAKE})
+    lens_model: Optional[str] = field(default=None, metadata={"exiftool": ExiftoolTag.LENS_MODEL})
+    focal_length: Optional[float] = field(default=None, metadata={"exiftool": ExiftoolTag.FOCAL_LENGTH})
+    f_number: Optional[float] = field(default=None, metadata={"exiftool": ExiftoolTag.F_NUMBER})
+    focal_length_in_35mm_film: Optional[int] = field(default=None, metadata={"exiftool": ExiftoolTag.FOCAL_LENGTH_35MM})
+    lens_specification: Optional[Tuple[float, float, float, float]] = field(default=None, metadata={"exiftool": ExiftoolTag.LENS_INFO})
+    max_aperture_value: Optional[float] = field(default=None, metadata={"exiftool": ExiftoolTag.MAX_APERTURE})
 
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None}
 
     def to_exiftool_dict(self) -> dict:
         result = {}
-        for f in fields(self):
-            value = getattr(self, f.name)
-            if value is None:
-                continue
-            tag = f.metadata.get("exiftool")
-            if not tag:
-                continue
-            if isinstance(value, (tuple, list)):
-                value = " ".join(str(v) for v in value)
-            result[tag] = value
+        if self.lens_make is not None:
+            result[ExiftoolTag.LENS_MAKE.value] = self.lens_make
+        if self.lens_model is not None:
+            result[ExiftoolTag.LENS_MODEL.value] = self.lens_model
+        if self.focal_length is not None:
+            result[ExiftoolTag.FOCAL_LENGTH.value] = self.focal_length
+        if self.f_number is not None:
+            result[ExiftoolTag.F_NUMBER.value] = self.f_number
+        if self.focal_length_in_35mm_film is not None:
+            result[ExiftoolTag.FOCAL_LENGTH_35MM.value] = self.focal_length_in_35mm_film
+        if self.lens_specification is not None:
+            result[ExiftoolTag.LENS_INFO.value] = " ".join(str(v) for v in self.lens_specification)
+        if self.max_aperture_value is not None:
+            result[ExiftoolTag.MAX_APERTURE.value] = self.max_aperture_value
         return result
 
 
@@ -119,7 +136,7 @@ LENSES = {
 
 
 class MyExif:
-    def __init__(self, lens: Union[Lens, dict]):
+    def __init__(self, lens: Union[Lens, dict], move_up: bool = True, overwrite: bool = False):
         if isinstance(lens, Lens):
             self.lens = lens
         else:
@@ -128,7 +145,9 @@ class MyExif:
             if unknown:
                 print(f"[EXIF] ignoring unknown lens keys: {sorted(unknown)}")
             self.lens = Lens(**{k: v for k, v in lens.items() if k in allowed})
-        self._et = None
+        self.move_up = move_up
+        self.overwrite = overwrite
+        self._exiftool_helper = None
 
     def apply_to_path(self, path: str) -> list[str]:
         with self._ensure_session():
@@ -139,13 +158,13 @@ class MyExif:
             return [moved] if moved else []
 
     @classmethod
-    def apply_by_subfolder_names(cls, parent_folder: str) -> dict[str, list[str]]:
+    def apply_by_subfolder_names(cls, parent_folder: str, move_up: bool = True, overwrite: bool = False) -> dict[str, list[str]]:
         import exiftool
 
         parent = Path(parent_folder)
         results: dict[str, list[str]] = {}
         keys_by_length = sorted(LENSES.keys(), key=len, reverse=True)
-        with exiftool.ExifToolHelper() as et:
+        with exiftool.ExifToolHelper() as exiftool_helper:
             for child in sorted(parent.iterdir()):
                 if not child.is_dir():
                     continue
@@ -156,14 +175,14 @@ class MyExif:
                     continue
                 lens = LENSES[matched_key]
                 print(f"[EXIF] {child.name} -> {matched_key} ({lens.lens_model})")
-                instance = cls(lens)
-                instance._et = et
+                instance = cls(lens, move_up=move_up, overwrite=overwrite)
+                instance._exiftool_helper = exiftool_helper
                 results[child.name] = instance.apply_to_path(str(child))
         return results
 
     @contextmanager
     def _ensure_session(self):
-        if self._et is not None:
+        if self._exiftool_helper is not None:
             yield
             return
         try:
@@ -172,12 +191,12 @@ class MyExif:
             print("[EXIF] pyexiftool not installed (pip install pyexiftool)")
             yield
             return
-        with exiftool.ExifToolHelper() as et:
-            self._et = et
+        with exiftool.ExifToolHelper() as exiftool_helper:
+            self._exiftool_helper = exiftool_helper
             try:
                 yield
             finally:
-                self._et = None
+                self._exiftool_helper = None
 
     def _apply_to_folder(self, folder: Path) -> list[str]:
         results: list[str] = []
@@ -201,6 +220,9 @@ class MyExif:
         if not ok:
             return None
 
+        if not self.move_up:
+            return str(path)
+
         try:
             return self._move_up(path)
         except Exception as e:
@@ -211,28 +233,124 @@ class MyExif:
         try:
             with open(path, "rb") as f:
                 img = Image(f)
-            for tag, value in self.lens.to_dict().items():
-                try:
+
+            # Try to read existing tags - if this fails, EXIF is likely corrupted
+            try:
+                for tag, value in self.lens.to_dict().items():
+                    existing = img.get(tag)
+                    if existing is not None and not self.overwrite:
+                        print(f"[EXIF] skip {tag} on {path.name}: already set to {existing}")
+                        continue
                     img.set(tag, value)
-                except Exception as e:
-                    print(f"[EXIF] skip {tag} on {path.name}: {e}")
+            except Exception as read_error:
+                # EXIF is corrupted, fallback to exiftool
+                raise read_error
+
             with open(path, "wb") as f:
                 f.write(img.get_file())
             return True
         except Exception as e:
+            # If exif lib fails (e.g., corrupted EXIF after deletion), fallback to exiftool
+            if self._exiftool_helper is not None:
+                print(f"[EXIF] exif lib failed for {path}: {_short_error(e)}, using exiftool...")
+                return self._write_with_exiftool(path)
             print(f"[EXIF] write failed for {path}: {type(e).__name__}: {_short_error(e)}")
             return False
 
     def _write_with_exiftool(self, path: Path) -> bool:
-        if self._et is None:
+        if self._exiftool_helper is None:
             print(f"[EXIF] no exiftool session for {path} (pyexiftool not installed?)")
             return False
         try:
-            self._et.set_tags([str(path)], tags=self.lens.to_exiftool_dict(), params=["-overwrite_original"])
+            # Read existing tags to avoid overwriting already set values (if not overwrite mode)
+            existing_data = self._exiftool_helper.execute_json(str(path))
+            existing_tags = existing_data[0] if existing_data else {}
+
+            # Write tags (skip already set unless overwrite is enabled)
+            tags_to_write = {}
+            for tag, value in self.lens.to_exiftool_dict().items():
+                if tag not in existing_tags or not existing_tags[tag]:
+                    tags_to_write[tag] = value
+                elif self.overwrite:
+                    tags_to_write[tag] = value
+                else:
+                    print(f"[EXIF] skip {tag} on {path.name}: already set to {existing_tags[tag]}")
+
+            if tags_to_write:
+                self._exiftool_helper.set_tags([str(path)], tags=tags_to_write, params=["-overwrite_original"])
             return True
         except Exception as e:
             print(f"[EXIF] exiftool failed for {path}: {type(e).__name__}: {_short_error(e)}")
             return False
+
+    @staticmethod
+    def delete_lens_tags(file_path: str) -> bool:
+        """Delete all lens-related EXIF tags from a file.
+
+        Removes all tags defined in ExiftoolTag enum (lens metadata).
+        """
+        try:
+            import exiftool
+            with exiftool.ExifToolHelper() as exiftool_helper:
+                # Build list of tags to delete with exiftool syntax (use = to actually clear them)
+                tags_to_delete = [f"-{tag.value}=" for tag in ExiftoolTag]
+                exiftool_helper.execute(*tags_to_delete, "-overwrite_original", str(file_path))
+            return True
+        except ImportError:
+            print("[EXIF] pyexiftool not installed (pip install pyexiftool)")
+            return False
+        except Exception as e:
+            print(f"[EXIF] failed to delete tags from {file_path}: {type(e).__name__}: {_short_error(e)}")
+            return False
+
+    @staticmethod
+    def get_exif_datetime(file_path: str) -> Optional[datetime]:
+        """Extract photo datetime from EXIF (JPEG, raw, video).
+
+        Returns datetime_original if available (when photo was taken),
+        falls back to other datetime tags.
+        """
+        path = Path(file_path)
+
+        # Try JPEG with exif library
+        if path.suffix in JPEG_EXTENSIONS:
+            try:
+                with open(path, "rb") as f:
+                    img = Image(f)
+                dt_str = img.get("datetime_original") or img.get("datetime")
+                if dt_str:
+                    return datetime.strptime(dt_str, "%Y:%m:%d %H:%M:%S")
+            except Exception:
+                pass
+
+        # Try with exiftool for raw/video/others
+        try:
+            import exiftool
+            with exiftool.ExifToolHelper() as exiftool_helper:
+                tags_list = exiftool_helper.execute_json(str(path))
+                if not tags_list:
+                    return None
+                tag_dict = tags_list[0]
+                # Try common datetime tags
+                dt_str = (
+                    tag_dict.get("DateTimeOriginal") or
+                    tag_dict.get("CreateDate") or
+                    tag_dict.get("ModifyDate") or
+                    tag_dict.get("CreationTime")
+                )
+                if dt_str:
+                    # Handle different datetime formats
+                    for fmt in ["%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]:
+                        try:
+                            return datetime.strptime(dt_str.split("+")[0].strip(), fmt)
+                        except ValueError:
+                            continue
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        return None
 
     @staticmethod
     def _move_up(path: Path) -> str:

@@ -1,6 +1,9 @@
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
+
+from flickr.exif import MyExif
 
 
 def organize_files_by_date(source_folder: str) -> None:
@@ -23,10 +26,21 @@ def organize_files_by_date(source_folder: str) -> None:
     print(f"Found {len(files)} file(s) to organize")
 
     for file_path in files:
-        create_time = file_path.stat().st_birthtime if hasattr(file_path.stat(), "st_birthtime") else file_path.stat().st_mtime
+        # Try to get datetime from EXIF first
+        exif_dt = MyExif.get_exif_datetime(str(file_path))
+        if exif_dt:
+            create_time = exif_dt.timestamp()
+        else:
+            # Fallback to file's creation/modification time
+            create_time = file_path.stat().st_birthtime if hasattr(file_path.stat(), "st_birthtime") else file_path.stat().st_mtime
+
         date_folder_name = datetime.fromtimestamp(create_time).strftime("%Y_%m_%d")
         date_folder_path = source_path / date_folder_name
         date_folder_path.mkdir(exist_ok=True)
         destination_path = date_folder_path / file_path.name
         shutil.move(str(file_path), str(destination_path))
+
+        # Set file's modification time to match the EXIF datetime (or extracted time)
+        os.utime(str(destination_path), (create_time, create_time))
+
         print(f"Moved: {file_path.name} -> {date_folder_name}/")

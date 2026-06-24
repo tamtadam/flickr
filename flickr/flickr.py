@@ -474,7 +474,9 @@ class FlickrSync:
         page: int = 1,
         limit: int = 9999999,
         singleton: bool = True,
+        year_set: str = "__2026__",
     ):
+        self.year_set = year_set
         self.flickr = flickr(api_key=api_key, api_secret=api_secret, singleton=singleton)
         self.photosets = self.flickr.photosets.getList(user_id="138370151@N02", per_page=number_of_sets, page=page, limit=3).call()
         print(f"Found {len(self.photosets)} photosets in Flickr.")
@@ -546,7 +548,7 @@ class FlickrSync:
             time.sleep(10)
             return self.upload_photo(file=file, cnt=cnt - 1)
 
-        photosets: list[PhotoSet] = self.get_photosets_by_titles(titles=file.sets + ["__2026__"], photo=photo)
+        photosets: list[PhotoSet] = self.get_photosets_by_titles(titles=[self.year_set] + file.sets, photo=photo)
 
         for photoset in photosets:
             self.flickr.photosets.addPhoto(photoset=photoset, photo=photo).call()
@@ -592,8 +594,9 @@ class FilesInSet:
     def __init__(self, full_path: str = ""):
         path = Path(full_path) if full_path else None
         self.full_path = full_path
-        self.sets = list(path.parts[-3:-1]) if full_path else ""
-        self.sets.remove("FAILED") if "FAILED" in self.sets else None
+        # Get only the immediate parent folder name
+        self.sets = [path.parts[-2]] if full_path and len(path.parts) >= 2 else []
+        self.sets = [s for s in self.sets if s != "FAILED"]
 
         self.filename = path.name if full_path else ""
         self.filename_without_ext = path.stem if full_path else ""

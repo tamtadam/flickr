@@ -10,14 +10,15 @@ parser.add_argument("--sync_folder", type=str, required=False, default="", help=
 parser.add_argument("--api_key", type=str, required=False, default="", help="Flickr API key.")
 parser.add_argument("--api_secret", type=str, required=False, default="", help="Flickr API secret.")
 parser.add_argument("--upload_failed", type=bool, required=False, default=False, help="Also retry files in FAILED subfolders.")
+parser.add_argument("--year_set", type=str, required=False, default="__2026__", help="Flickr set name used as year tag.")
 parser.add_argument("--public", type=int, choices=[0, 1], default=0, help="(unused, kept for backward compat)")
 args = parser.parse_args()
 
 print(f"Using: {args.folders or args.folder or args.sync_folder}")
 
 if args.sync_folder:
-    sync_folder(args.sync_folder, args.api_key, args.api_secret, args.upload_failed)
+    sync_folder(args.sync_folder, args.api_key, args.api_secret, args.upload_failed, args.year_set)
 elif args.folder:
-    upload_single_folder(args.folder, args.api_key, args.api_secret, args.upload_failed)
+    upload_single_folder(args.folder, args.api_key, args.api_secret, args.upload_failed, year_set=args.year_set)
 elif args.folders:
-    upload_multiple_folders(args.folders.split(","), args.api_key, args.api_secret, args.upload_failed)
+    upload_multiple_folders(args.folders.split(","), args.api_key, args.api_secret, args.upload_failed, year_set=args.year_set)
