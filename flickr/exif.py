@@ -36,11 +36,28 @@ def _short_error(e: Exception) -> str:
 class Lens:
     lens_make: Optional[str] = field(default=None, metadata={"exiftool": ExiftoolTag.LENS_MAKE})
     lens_model: Optional[str] = field(default=None, metadata={"exiftool": ExiftoolTag.LENS_MODEL})
-    focal_length: Optional[float] = field(default=None, metadata={"exiftool": ExiftoolTag.FOCAL_LENGTH})
-    f_number: Optional[float] = field(default=None, metadata={"exiftool": ExiftoolTag.F_NUMBER})
-    focal_length_in_35mm_film: Optional[int] = field(default=None, metadata={"exiftool": ExiftoolTag.FOCAL_LENGTH_35MM})
-    lens_specification: Optional[Tuple[float, float, float, float]] = field(default=None, metadata={"exiftool": ExiftoolTag.LENS_INFO})
-    max_aperture_value: Optional[float] = field(default=None, metadata={"exiftool": ExiftoolTag.MAX_APERTURE})
+    focal_length: Optional[str] = field(default=None, metadata={"exiftool": ExiftoolTag.FOCAL_LENGTH})
+    f_number: Optional[str] = field(default=None, metadata={"exiftool": ExiftoolTag.F_NUMBER})
+    focal_length_in_35mm_film: Optional[str] = field(default=None, metadata={"exiftool": ExiftoolTag.FOCAL_LENGTH_35MM})
+    lens_specification: Optional[Tuple[str, str, str, str]] = field(default=None, metadata={"exiftool": ExiftoolTag.LENS_INFO})
+    max_aperture_value: Optional[str] = field(default=None, metadata={"exiftool": ExiftoolTag.MAX_APERTURE})
+
+    def __post_init__(self) -> None:
+        """Convert all non-None parameters to string."""
+        if self.lens_make is not None:
+            self.lens_make = str(self.lens_make)
+        if self.lens_model is not None:
+            self.lens_model = str(self.lens_model)
+        if self.focal_length is not None:
+            self.focal_length = str(self.focal_length)
+        if self.f_number is not None:
+            self.f_number = str(self.f_number)
+        if self.focal_length_in_35mm_film is not None:
+            self.focal_length_in_35mm_film = str(self.focal_length_in_35mm_film)
+        if self.lens_specification is not None:
+            self.lens_specification = tuple(str(v) for v in self.lens_specification)
+        if self.max_aperture_value is not None:
+            self.max_aperture_value = str(self.max_aperture_value)
 
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None}

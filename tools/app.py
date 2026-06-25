@@ -60,8 +60,11 @@ class App:
         ttk.Label(top, text="Akció:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
         self.action = tk.StringVar(value="Feltöltés")
         ttk.Combobox(
-            top, textvariable=self.action, state="readonly",
-            values=["Feltöltés", "Szinkronizálás", "Objektív EXIF", "Rendezés dátum szerint"], width=30,
+            top,
+            textvariable=self.action,
+            state="readonly",
+            values=["Feltöltés", "Szinkronizálás", "Objektív EXIF", "Rendezés dátum szerint"],
+            width=30,
         ).grid(row=1, column=1, sticky="w", pady=4)
         self.action.trace_add("write", self._rebuild_params)
 
@@ -126,8 +129,9 @@ class App:
     def _build_exif_params(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Objektív:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
         lens = tk.StringVar(value="auto")
-        ttk.Combobox(parent, textvariable=lens, state="readonly",
-                     values=["auto"] + sorted(LENSES.keys()), width=30).grid(row=0, column=1, sticky="w", pady=4)
+        ttk.Combobox(parent, textvariable=lens, state="readonly", values=["auto"] + sorted(LENSES.keys()), width=30).grid(
+            row=0, column=1, sticky="w", pady=4
+        )
         move_up = tk.IntVar(value=1)
         ttk.Checkbutton(parent, text="Fájlok mozgatása egy mappával felfelé", variable=move_up).grid(row=1, column=1, sticky="w", pady=4)
         overwrite = tk.IntVar(value=0)
@@ -137,8 +141,15 @@ class App:
         write_exif = tk.IntVar(value=1)
         ttk.Checkbutton(parent, text="EXIF írása", variable=write_exif).grid(row=4, column=1, sticky="w", pady=4)
         show_metadata = tk.IntVar(value=0)
-        ttk.Checkbutton(parent, text="Metaadatok megjelenítése után", variable=show_metadata).grid(row=5, column=1, sticky="w", pady=4)
-        self.action_params = {"lens": lens, "move_up": move_up, "overwrite": overwrite, "delete_tags": delete_tags, "write_exif": write_exif, "show_metadata": show_metadata}
+        ttk.Checkbutton(parent, text="EXIF adatok megjelenítése", variable=show_metadata).grid(row=5, column=1, sticky="w", pady=4)
+        self.action_params = {
+            "lens": lens,
+            "move_up": move_up,
+            "overwrite": overwrite,
+            "delete_tags": delete_tags,
+            "write_exif": write_exif,
+            "show_metadata": show_metadata,
+        }
 
     def _build_organize_params(self, parent: ttk.Frame) -> None:
         pass  # No additional parameters needed for organize
@@ -185,7 +196,17 @@ class App:
             if lens_key == "auto":
                 self._run_in_background("EXIF (auto)", _run_auto_exif, paths[0], move_up, overwrite, delete_tags, write_exif, show_metadata)
             else:
-                self._run_in_background(f"EXIF ({lens_key})", _run_single_lens_exif, paths[0], lens_key, move_up, overwrite, delete_tags, write_exif, show_metadata)
+                self._run_in_background(
+                    f"EXIF ({lens_key})",
+                    _run_single_lens_exif,
+                    paths[0],
+                    lens_key,
+                    move_up,
+                    overwrite,
+                    delete_tags,
+                    write_exif,
+                    show_metadata,
+                )
 
         elif act == "Rendezés dátum szerint":
             if len(paths) > 1:
@@ -231,7 +252,14 @@ class App:
         self.output.see("end")
 
 
-def _run_auto_exif(folder: str, move_up: bool = True, overwrite: bool = False, delete_tags: bool = False, write_exif: bool = True, show_metadata: bool = False) -> None:
+def _run_auto_exif(
+    folder: str,
+    move_up: bool = True,
+    overwrite: bool = False,
+    delete_tags: bool = False,
+    write_exif: bool = True,
+    show_metadata: bool = False,
+) -> None:
     if delete_tags:
         print("[EXIF] Deleting existing lens tags before applying...")
         _delete_tags_recursively(folder)
@@ -248,7 +276,15 @@ def _run_auto_exif(folder: str, move_up: bool = True, overwrite: bool = False, d
         MyExif.print_lens_tags_table(folder)
 
 
-def _run_single_lens_exif(folder: str, lens_key: str, move_up: bool = True, overwrite: bool = False, delete_tags: bool = False, write_exif: bool = True, show_metadata: bool = False) -> None:
+def _run_single_lens_exif(
+    folder: str,
+    lens_key: str,
+    move_up: bool = True,
+    overwrite: bool = False,
+    delete_tags: bool = False,
+    write_exif: bool = True,
+    show_metadata: bool = False,
+) -> None:
     if delete_tags:
         print("[EXIF] Deleting existing lens tags before applying...")
         _delete_tags_recursively(folder)
