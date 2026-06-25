@@ -141,7 +141,7 @@ class App:
         overwrite = tk.IntVar(value=0)
         ttk.Checkbutton(parent, text="Felülírással", variable=overwrite).grid(row=3, column=2, sticky="w", padx=(8, 0), pady=4)
         show_metadata = tk.IntVar(value=0)
-        ttk.Checkbutton(parent, text="Metaadatok megjelenítése után", variable=show_metadata).grid(row=4, column=1, sticky="w", pady=4)
+        ttk.Checkbutton(parent, text="EXIF kilistázása", variable=show_metadata).grid(row=4, column=1, sticky="w", pady=4)
         self.action_params = {
             "lens": lens,
             "move_up": move_up,

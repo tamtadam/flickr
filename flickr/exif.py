@@ -1,3 +1,4 @@
+from importlib.resources import path
 import os
 import shutil
 from contextlib import contextmanager
@@ -57,7 +58,7 @@ class Lens:
         if self.lens_specification is not None:
             self.lens_specification = tuple(str(v) for v in self.lens_specification)
         if self.max_aperture_value is not None:
-            self.max_aperture_value = str(self.max_aperture_value)
+            self.max_aperture_value = self.max_aperture_value
 
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -95,10 +96,10 @@ HELIOS_44M = Lens(
     lens_make="KMZ",
     lens_model="Helios-44M 58mm f/2",
     focal_length="58",
-    f_number="2",
+    f_number="2.0",
     focal_length_in_35mm_film="58",
     lens_specification=("58", "58", "2", "2"),
-    max_aperture_value="2",
+    max_aperture_value="2.0",
 )
 
 # A Tair sorozatból a 11-es 135/2.8 — ha a "21m" mást jelölne, írd át a megfelelő értékre.
@@ -127,10 +128,10 @@ JUPITER_21M = Lens(
     lens_make="MMZ",
     lens_model="Jupiter-21M 200mm f/4",
     focal_length="200",
-    f_number="4",
+    f_number="4.0",
     focal_length_in_35mm_film="200",
     lens_specification=("200", "200", "4", "4"),
-    max_aperture_value="4",
+    max_aperture_value="4.0",
 )
 
 JUPITER_37A = Lens(
@@ -227,13 +228,7 @@ class MyExif:
         return results
 
     def _apply_to_file(self, path: Path) -> Optional[str]:
-        if path.suffix in JPEG_EXTENSIONS:
-            ok = self._write_with_exif_lib(path)
-        elif path.suffix in EXIFTOOL_EXTENSIONS:
-            ok = self._write_with_exiftool(path)
-        else:
-            print(f"[EXIF] unsupported extension: {path}")
-            return None
+        ok = self._write_with_exiftool(path)
 
         if not ok:
             return None
@@ -314,9 +309,9 @@ class MyExif:
         """Verify that lens tags were written correctly to file.
 
         Compares expected (from self.lens) vs actual (read from file) values.
-        Numeric tags (FNumber, MaxApertureValue, etc.) are compared with float tolerance.
         Logs errors if mismatch found.
         Uses fresh exiftool session to avoid caching issues from write session.
+        Tolerates float precision differences for numeric EXIF tags.
         """
         actual = self.read_lens_tags(str(path), exiftool_helper=None)
         expected = self.lens.to_exiftool_dict()
@@ -324,12 +319,11 @@ class MyExif:
         # Map exiftool tag names to enum names for lookup in actual dict
         exif_to_enum = {tag.value: tag.name for tag in ExiftoolTag}
 
-        # Numeric tags where exiftool may have floating point precision differences
-        numeric_tags = {
-            ExiftoolTag.F_NUMBER.value,
-            ExiftoolTag.MAX_APERTURE.value,
-            ExiftoolTag.FOCAL_LENGTH.value,
-            ExiftoolTag.FOCAL_LENGTH_35MM.value,
+        # Tags that may be stored as rational numbers with float precision issues
+        FLOAT_TAGS = {
+            ExiftoolTag.MAX_APERTURE.value,  # MaxApertureValue — APEX rational
+            ExiftoolTag.F_NUMBER.value,  # FNumber — rational
+            ExiftoolTag.FOCAL_LENGTH.value,  # FocalLength — rational
         }
 
         errors = []
@@ -337,19 +331,14 @@ class MyExif:
             enum_name = exif_to_enum.get(exif_tag_name)
             actual_value = actual.get(enum_name)
 
-            # For numeric tags, compare as floats with tolerance
-            if exif_tag_name in numeric_tags:
+            # Use float tolerance for numeric tags, string comparison for others
+            if exif_tag_name in FLOAT_TAGS:
                 try:
-                    exp_float = float(str(expected_value).split()[0])
-                    act_float = float(str(actual_value).split()[0])
-                    if abs(exp_float - act_float) > 0.0001:
+                    if expected_value != str(round(actual_value, 2)):
                         errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
-                except (ValueError, AttributeError, TypeError):
-                    # Fall back to string comparison if conversion fails
-                    if str(actual_value) != str(expected_value):
-                        errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
+                except (TypeError, ValueError):
+                    errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value} (not numeric)")
             else:
-                # String comparison for non-numeric tags
                 if str(actual_value) != str(expected_value):
                     errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
 
@@ -390,18 +379,6 @@ class MyExif:
         falls back to other datetime tags.
         """
         path = Path(file_path)
-
-        # Try JPEG with exif library
-        if path.suffix in JPEG_EXTENSIONS:
-            try:
-                with open(path, "rb") as f:
-                    img = Image(f)
-                dt_str = img.get("datetime_original") or img.get("datetime")
-                if dt_str:
-                    return datetime.strptime(dt_str, "%Y:%m:%d %H:%M:%S")
-            except Exception:
-                pass
-
         # Try with exiftool for raw/video/others
         try:
             import exiftool
@@ -441,21 +418,6 @@ class MyExif:
         """
         path = Path(file_path)
         result = {tag.name: None for tag in ExiftoolTag}
-
-        # Try JPEG with exif library first
-        if path.suffix in JPEG_EXTENSIONS:
-            try:
-                with open(path, "rb") as f:
-                    img = Image(f)
-                for tag in ExiftoolTag:
-                    value = img.get(tag.name.lower())
-                    if value is not None:
-                        result[tag.name] = str(value)
-                return result  # Return early if JPEG was processed successfully
-            except Exception:
-                pass  # Fall through to exiftool if exif lib fails
-
-        # Use exiftool for raw/video/others or if JPEG exif lib failed
         try:
             import exiftool
 
@@ -475,7 +437,7 @@ class MyExif:
                         # exiftool returns tags with EXIF: prefix
                         value = tag_dict.get(f"EXIF:{tag.value}")
                         if value is not None:
-                            result[tag.name] = str(value)
+                            result[tag.name] = value
             finally:
                 if should_close:
                     exiftool_helper.__exit__(None, None, None)
@@ -537,7 +499,7 @@ class MyExif:
             for _, tags in table_data:
                 value = tags.get(tag_name)
                 if value:
-                    max_width = max(max_width, len(value))
+                    max_width = max(max_width, len(str(value)))
             col_widths.append(max_width)
 
         # Print header
@@ -547,7 +509,7 @@ class MyExif:
 
         # Print rows
         for file_name, tags in table_data:
-            row_parts = [file_name] + [tags.get(tag_name) or "-" for tag_name in tag_names]
+            row_parts = [file_name] + [str(tags.get(tag_name)) or "-" for tag_name in tag_names]
             row = " | ".join(row_parts[i].ljust(col_widths[i]) for i in range(len(row_parts)))
             print(row)
 
