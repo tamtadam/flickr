@@ -303,15 +303,16 @@ class MyExif:
         actual = self.read_lens_tags(str(path), exiftool_helper=None)
         expected = self.lens.to_exiftool_dict()
 
-        errors = []
-        for tag_obj in ExiftoolTag:
-            exif_tag_name = tag_obj.value
-            expected_value = expected.get(exif_tag_name)
-            actual_value = actual.get(tag_obj.name)
+        # Map exiftool tag names to enum names for lookup in actual dict
+        exif_to_enum = {tag.value: tag.name for tag in ExiftoolTag}
 
-            if expected_value is not None:
-                if str(actual_value) != str(expected_value):
-                    errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
+        errors = []
+        for exif_tag_name, expected_value in expected.items():
+            enum_name = exif_to_enum.get(exif_tag_name)
+            actual_value = actual.get(enum_name)
+
+            if str(actual_value) != str(expected_value):
+                errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
 
         if errors:
             print(f"[EXIF] Verification failed for {path.name}:")
