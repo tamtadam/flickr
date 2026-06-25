@@ -84,63 +84,63 @@ class Lens:
 SMC_TAKUMAR_50_1_4 = Lens(
     lens_make="Asahi Opt. Co.",
     lens_model="SMC Takumar 50mm f/1.4",
-    focal_length=50.0,
-    f_number=1.4,
-    focal_length_in_35mm_film=50,
-    lens_specification=(50.0, 50.0, 1.4, 1.4),
-    max_aperture_value=1.4,
+    focal_length="50",
+    f_number="1.4",
+    focal_length_in_35mm_film="50",
+    lens_specification=("50", "50", "1.4", "1.4"),
+    max_aperture_value="1.4",
 )
 
 HELIOS_44M = Lens(
     lens_make="KMZ",
     lens_model="Helios-44M 58mm f/2",
-    focal_length=58.0,
-    f_number=2.0,
-    focal_length_in_35mm_film=58,
-    lens_specification=(58.0, 58.0, 2.0, 2.0),
-    max_aperture_value=2.0,
+    focal_length="58",
+    f_number="2",
+    focal_length_in_35mm_film="58",
+    lens_specification=("58", "58", "2", "2"),
+    max_aperture_value="2",
 )
 
 # A Tair sorozatból a 11-es 135/2.8 — ha a "21m" mást jelölne, írd át a megfelelő értékre.
 TAIR_11 = Lens(
     lens_make="KMZ",
     lens_model="Tair-11 135mm f/2.8",
-    focal_length=135.0,
-    f_number=2.8,
-    focal_length_in_35mm_film=135,
-    lens_specification=(135.0, 135.0, 2.8, 2.8),
-    max_aperture_value=2.8,
+    focal_length="135",
+    f_number="2.8",
+    focal_length_in_35mm_film="135",
+    lens_specification=("135", "135", "2.8", "2.8"),
+    max_aperture_value="2.8",
 )
 
 # A Photosniper (FS-12) készlet objektívje: Tair-3-PhS 300mm f/4.5.
 PHOTOSNIPER_TAIR_3 = Lens(
     lens_make="KMZ",
     lens_model="Tair-3-PhS 300mm f/4.5 (Photosniper)",
-    focal_length=300.0,
-    f_number=4.5,
-    focal_length_in_35mm_film=300,
-    lens_specification=(300.0, 300.0, 4.5, 4.5),
-    max_aperture_value=4.5,
+    focal_length="300",
+    f_number="4.5",
+    focal_length_in_35mm_film="300",
+    lens_specification=("300", "300", "4.5", "4.5"),
+    max_aperture_value="4.5",
 )
 
 JUPITER_21M = Lens(
     lens_make="MMZ",
     lens_model="Jupiter-21M 200mm f/4",
-    focal_length=200.0,
-    f_number=4.0,
-    focal_length_in_35mm_film=200,
-    lens_specification=(200.0, 200.0, 4.0, 4.0),
-    max_aperture_value=4.0,
+    focal_length="200",
+    f_number="4",
+    focal_length_in_35mm_film="200",
+    lens_specification=("200", "200", "4", "4"),
+    max_aperture_value="4",
 )
 
 JUPITER_37A = Lens(
     lens_make="KMZ",
     lens_model="Jupiter-37A 135mm f/3.5",
-    focal_length=135.0,
-    f_number=3.5,
-    focal_length_in_35mm_film=135,
-    lens_specification=(135.0, 135.0, 3.5, 3.5),
-    max_aperture_value=3.5,
+    focal_length="135",
+    f_number="3.5",
+    focal_length_in_35mm_film="135",
+    lens_specification=("135", "135", "3.5", "3.5"),
+    max_aperture_value="3.5",
 )
 
 LENSES = {
@@ -314,6 +314,7 @@ class MyExif:
         """Verify that lens tags were written correctly to file.
 
         Compares expected (from self.lens) vs actual (read from file) values.
+        Numeric tags (FNumber, MaxApertureValue, etc.) are compared with float tolerance.
         Logs errors if mismatch found.
         Uses fresh exiftool session to avoid caching issues from write session.
         """
@@ -323,13 +324,34 @@ class MyExif:
         # Map exiftool tag names to enum names for lookup in actual dict
         exif_to_enum = {tag.value: tag.name for tag in ExiftoolTag}
 
+        # Numeric tags where exiftool may have floating point precision differences
+        numeric_tags = {
+            ExiftoolTag.F_NUMBER.value,
+            ExiftoolTag.MAX_APERTURE.value,
+            ExiftoolTag.FOCAL_LENGTH.value,
+            ExiftoolTag.FOCAL_LENGTH_35MM.value,
+        }
+
         errors = []
         for exif_tag_name, expected_value in expected.items():
             enum_name = exif_to_enum.get(exif_tag_name)
             actual_value = actual.get(enum_name)
 
-            if str(actual_value) != str(expected_value):
-                errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
+            # For numeric tags, compare as floats with tolerance
+            if exif_tag_name in numeric_tags:
+                try:
+                    exp_float = float(str(expected_value).split()[0])
+                    act_float = float(str(actual_value).split()[0])
+                    if abs(exp_float - act_float) > 0.0001:
+                        errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
+                except (ValueError, AttributeError, TypeError):
+                    # Fall back to string comparison if conversion fails
+                    if str(actual_value) != str(expected_value):
+                        errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
+            else:
+                # String comparison for non-numeric tags
+                if str(actual_value) != str(expected_value):
+                    errors.append(f"{exif_tag_name}: expected {expected_value}, got {actual_value}")
 
         if errors:
             print(f"[EXIF] Verification failed for {path.name}:")
