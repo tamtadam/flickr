@@ -134,14 +134,14 @@ class App:
         )
         move_up = tk.IntVar(value=1)
         ttk.Checkbutton(parent, text="Fájlok mozgatása egy mappával felfelé", variable=move_up).grid(row=1, column=1, sticky="w", pady=4)
-        overwrite = tk.IntVar(value=0)
-        ttk.Checkbutton(parent, text="EXIF felülírása (ha már létezik)", variable=overwrite).grid(row=2, column=1, sticky="w", pady=4)
         delete_tags = tk.IntVar(value=0)
-        ttk.Checkbutton(parent, text="Meglévő objektív tag-ek törlése", variable=delete_tags).grid(row=3, column=1, sticky="w", pady=4)
+        ttk.Checkbutton(parent, text="Meglévő objektív tag-ek törlése", variable=delete_tags).grid(row=2, column=1, sticky="w", pady=4)
         write_exif = tk.IntVar(value=1)
-        ttk.Checkbutton(parent, text="EXIF írása", variable=write_exif).grid(row=4, column=1, sticky="w", pady=4)
+        ttk.Checkbutton(parent, text="EXIF írása", variable=write_exif).grid(row=3, column=1, sticky="w", pady=4)
+        overwrite = tk.IntVar(value=0)
+        ttk.Checkbutton(parent, text="Felülírással", variable=overwrite).grid(row=3, column=2, sticky="w", padx=(8, 0), pady=4)
         show_metadata = tk.IntVar(value=0)
-        ttk.Checkbutton(parent, text="EXIF adatok megjelenítése", variable=show_metadata).grid(row=5, column=1, sticky="w", pady=4)
+        ttk.Checkbutton(parent, text="Metaadatok megjelenítése után", variable=show_metadata).grid(row=4, column=1, sticky="w", pady=4)
         self.action_params = {
             "lens": lens,
             "move_up": move_up,
