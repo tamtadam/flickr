@@ -1,6 +1,6 @@
-from importlib.resources import path
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime
@@ -144,6 +144,16 @@ JUPITER_37A = Lens(
     max_aperture_value="3.5",
 )
 
+SONNAR_180_2_8 = Lens(
+    lens_make="Carl Zeiss Jena",
+    lens_model="Sonnar 180mm f/2.8",
+    focal_length="180",
+    f_number="2.8",
+    focal_length_in_35mm_film="180",
+    lens_specification=("180", "180", "2.8", "2.8"),
+    max_aperture_value="2.8",
+)
+
 LENSES = {
     "smc_takumar_50_1_4": SMC_TAKUMAR_50_1_4,
     "helios_44m": HELIOS_44M,
@@ -151,6 +161,7 @@ LENSES = {
     "photosniper": PHOTOSNIPER_TAIR_3,
     "jupiter_21m": JUPITER_21M,
     "jupiter_37a": JUPITER_37A,
+    "sonnar_180_2_8": SONNAR_180_2_8,
 }
 
 
@@ -218,14 +229,22 @@ class MyExif:
                 self._exiftool_helper = None
 
     def _apply_to_folder(self, folder: Path) -> list[str]:
-        results: list[str] = []
-        for root, _, files in os.walk(folder):
-            for name in files:
-                if name.endswith(IMAGE_EXTENSIONS):
-                    moved = self._apply_to_file(Path(root) / name)
-                    if moved:
-                        results.append(moved)
-        return results
+        # Collect all image files
+        image_files = [
+            Path(root) / name
+            for root, _, files in os.walk(folder)
+            for name in files
+            if name.endswith(IMAGE_EXTENSIONS)
+        ]
+
+        # Process each file in parallel with its own exiftool session
+        def process(path: Path) -> Optional[str]:
+            instance = MyExif(self.lens, move_up=self.move_up, overwrite=self.overwrite)
+            with instance._ensure_session():
+                return instance._apply_to_file(path)
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            return [r for r in executor.map(process, image_files) if r]
 
     def _apply_to_file(self, path: Path) -> Optional[str]:
         ok = self._write_with_exiftool(path)
@@ -462,31 +481,23 @@ class MyExif:
             return
 
         # Collect image files (including subdirectories)
-        image_files = []
-        for root, _, files in os.walk(path):
-            for name in files:
-                if name.endswith(IMAGE_EXTENSIONS):
-                    image_files.append(Path(root) / name)
+        image_files = [
+            Path(root) / name
+            for root, _, files in os.walk(path)
+            for name in files
+            if name.endswith(IMAGE_EXTENSIONS)
+        ]
 
         if not image_files:
             print(f"No image files found in '{folder_path}'")
             return
 
-        # Use a single exiftool session for all reads (important for ARW files)
-        try:
-            import exiftool
+        # Read tags in parallel (each thread gets its own exiftool session)
+        def read_task(file_path: Path) -> tuple[str, dict]:
+            return (file_path.name, MyExif.read_lens_tags(str(file_path)))
 
-            with exiftool.ExifToolHelper() as exiftool_helper:
-                table_data = []
-                for file_path in sorted(image_files):
-                    tags = MyExif.read_lens_tags(str(file_path), exiftool_helper)
-                    table_data.append((file_path.name, tags))
-        except ImportError:
-            # Fallback without exiftool
-            table_data = []
-            for file_path in sorted(image_files):
-                tags = MyExif.read_lens_tags(str(file_path))
-                table_data.append((file_path.name, tags))
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            table_data = list(executor.map(read_task, sorted(image_files)))
 
         # Print header
         tag_names = [tag.name for tag in ExiftoolTag]
