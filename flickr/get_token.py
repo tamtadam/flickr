@@ -4,13 +4,12 @@ import os
 
 
 import flickrapi
- 
-api_key = u'd'
-api_secret = u'd'
- 
-flickr = flickrapi.FlickrAPI(api_key, api_secret)
-flickr.authenticate_via_browser(perms='write')
 
+api_key = "d"
+api_secret = "d"
+
+flickr = flickrapi.FlickrAPI(api_key, api_secret)
+flickr.authenticate_via_browser(perms="write")
 
 
 API_KEY = os.getenv("FLICKR_API_KEY", "d")

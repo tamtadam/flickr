@@ -1,29 +1,31 @@
-import flickrapi
-from exif import Image
-import os
-from flickr.image_random import read_file_names_from_folder_recursively, get_folders_from_path
-import time
-from flickr.utils.my_threading import ThreadPooler, execute_in_parallel
-import math
 import logging
+import math
+from collections.abc import Generator
+from typing import BinaryIO
+import mimetypes
+import os
+import shutil
+import ssl
+import threading
+import time
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from urllib.parse import urlencode
+
+import flickrapi
+import requests
+import urllib3
+from exif import Image
+from oauthlib.oauth1 import Client
+from requests.adapters import HTTPAdapter
+from requests_toolbelt.multipart.encoder import MultipartEncoder
+from urllib3.util.ssl_ import create_urllib3_context
+
+from flickr.image_random import read_file_names_from_folder_recursively
 from flickr.token import FlickrToken
+from flickr.utils.my_threading import ThreadPooler, execute_in_parallel
 from flickr.utils.url_lib_request import URLLibRequest
 from flickr.utils.url_lib_response import URLLibResponse
-import xml.etree.ElementTree as ET
-from oauthlib.oauth1 import Client
-from urllib.parse import urlencode
-from requests_toolbelt.multipart.encoder import MultipartEncoder
-from urllib3 import encode_multipart_formdata
-import threading
-import urllib3
-import shutil
-import mimetypes
-from pathlib import Path
-import ssl
-import urllib3
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.ssl_ import create_urllib3_context
 
 # Suppress warning logs from the exif/plum modules
 logging.getLogger("exif").setLevel(logging.ERROR)
@@ -64,13 +66,13 @@ def minus(a: list, b: list) -> list:
     return [item for item in a if item not in b]
 
 
-def chunks(lst, n):
+def chunks(lst: list, n: int) -> Generator[list, None, None]:
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
         yield lst[i : i + n]
 
 
-def devide_array(array: list, slot_number: int, extra_params) -> list[dict]:
+def devide_array(array: list, slot_number: int, extra_params: dict) -> list[dict]:
     total_length = len(array)
     params = []
     part_size = math.ceil(total_length / slot_number)
@@ -85,7 +87,7 @@ def devide_array(array: list, slot_number: int, extra_params) -> list[dict]:
 
 
 class MyExif:
-    def __init__(self, image_path: str, file_obj=None):
+    def __init__(self, image_path: str, file_obj: BinaryIO | None = None):
         self.image_path = image_path
         self.file_obj = file_obj
         self.data: dict = {}
@@ -103,7 +105,7 @@ class MyExif:
                 exif = Image(self.file_obj)
 
             return exif.get_all()
-        except Exception as e:
+        except Exception:
             return None
 
     def get_exifs_by_keys(self, keys: list[str]) -> list[str]:
@@ -353,7 +355,7 @@ class flickr(Myflickr):
                         print(f"Added photo by {threading.current_thread().name} {self.photo.title} to photoset {self.photoset.title}")
                         return True
                     return False
-                except flickrapi.exceptions.FlickrError as e:
+                except flickrapi.exceptions.FlickrError:
                     return False
 
         class getList:
@@ -391,7 +393,7 @@ class flickr(Myflickr):
                     result = self.flickr_api.photosets.getPhotos(
                         user_id=self.user_id, photoset_id=self.photoset_id, page=self.page, per_page=self.per_page
                     )
-                except flickrapi.exceptions.FlickrError as e:
+                except flickrapi.exceptions.FlickrError:
                     return []
                 pagination = Pagination(result.get("photoset", {}))
                 if pagination.page <= pagination.pages:
@@ -544,7 +546,7 @@ class FlickrSync:
                 print(f"Successfully uploaded {file.filename_without_ext} with ID: {photo.id}")
                 if os.path.exists(file.full_path):
                     os.remove(file.full_path)
-        except Exception as e:
+        except Exception:
             time.sleep(10)
             return self.upload_photo(file=file, cnt=cnt - 1)
 

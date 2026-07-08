@@ -25,6 +25,28 @@ class QueueWriter:
         pass
 
 
+def _pick_folders_macos(initial_dir: str = "") -> list[str]:
+    import subprocess
+
+    default_loc = f' default location (POSIX file "{initial_dir}")' if initial_dir and os.path.isdir(initial_dir) else ""
+    script = f"""
+set folderList to choose folder with multiple selections allowed{default_loc}
+set posixPaths to ""
+repeat with aFolder in folderList
+    set posixPaths to posixPaths & POSIX path of aFolder & linefeed
+end repeat
+return posixPaths
+"""
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr)
+        return [p for p in result.stdout.strip().splitlines() if p]
+    except Exception:
+        p = filedialog.askdirectory(initialdir=initial_dir or os.path.expanduser("~"))
+        return [p] if p else []
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -36,6 +58,7 @@ class App:
         self.action_params: dict = {}
 
         self.upload_root = tk.StringVar(value=os.environ.get("UPLOAD_ROOT", UPLOAD_ROOT or os.path.expanduser("~")))
+        self._last_dir: str = self.upload_root.get() or os.path.expanduser("~")
 
         self._build_layout()
         self.root.after(100, self._drain_output)
@@ -63,7 +86,7 @@ class App:
             top,
             textvariable=self.action,
             state="readonly",
-            values=["Feltöltés", "Szinkronizálás", "Objektív EXIF", "Rendezés dátum szerint"],
+            values=["Feltöltés", "Szinkronizálás", "Objektív EXIF", "Rendezés dátum szerint", "Törlés kiterjesztés szerint", "Duplikátum törlés (_conv)"],
             width=30,
         ).grid(row=1, column=1, sticky="w", pady=4)
         self.action.trace_add("write", self._rebuild_params)
@@ -84,9 +107,11 @@ class App:
         self.output.configure(yscrollcommand=scroll.set)
 
     def _add_folder(self) -> None:
-        p = filedialog.askdirectory(initialdir=self.upload_root.get() or os.path.expanduser("~"))
-        if p:
-            self.listbox.insert("end", p)
+        paths = _pick_folders_macos(self._last_dir)
+        if paths:
+            self._last_dir = paths[-1]
+            for p in paths:
+                self.listbox.insert("end", p.rstrip("/"))
 
     def _remove_folder(self) -> None:
         for i in reversed(self.listbox.curselection()):
@@ -103,6 +128,10 @@ class App:
             self._build_exif_params(self.params_frame)
         elif act == "Rendezés dátum szerint":
             self._build_organize_params(self.params_frame)
+        elif act == "Törlés kiterjesztés szerint":
+            self._build_delete_params(self.params_frame)
+        elif act == "Duplikátum törlés (_conv)":
+            self._build_dedup_params(self.params_frame)
 
     def _build_upload_params(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Alapmappa:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
@@ -154,6 +183,37 @@ class App:
     def _build_organize_params(self, parent: ttk.Frame) -> None:
         pass  # No additional parameters needed for organize
 
+    def _build_delete_params(self, parent: ttk.Frame) -> None:
+        _PRESET_EXTS = ["LRV", "acr", "ARW", "XML"]
+
+        ttk.Label(parent, text="Kiterjesztések:").grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=4)
+
+        check_frame = ttk.Frame(parent)
+        check_frame.grid(row=0, column=1, sticky="w", pady=4)
+        ext_vars: dict[str, tk.IntVar] = {}
+        for i, ext in enumerate(_PRESET_EXTS):
+            var = tk.IntVar(value=0)
+            ext_vars[ext] = var
+            ttk.Checkbutton(check_frame, text=f".{ext}", variable=var).grid(row=0, column=i, sticky="w", padx=(0, 12))
+
+        ttk.Label(parent, text="Egyéb:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        custom_extensions = tk.StringVar(value="")
+        ttk.Entry(parent, textvariable=custom_extensions, width=40).grid(row=1, column=1, sticky="w", pady=4)
+        ttk.Label(parent, text="(vesszővel elválasztva)", foreground="gray").grid(row=1, column=2, sticky="w", padx=(8, 0))
+
+        dry_run = tk.IntVar(value=1)
+        ttk.Checkbutton(parent, text="Próbafutás (csak listáz, nem töröl)", variable=dry_run).grid(row=2, column=1, sticky="w", pady=4)
+        self.action_params = {"ext_vars": ext_vars, "custom_extensions": custom_extensions, "dry_run": dry_run}
+
+    def _build_dedup_params(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="Törli:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
+        delete_conv = tk.StringVar(value="conv")
+        ttk.Radiobutton(parent, text="_conv verziót (eredeti marad)", variable=delete_conv, value="conv").grid(row=0, column=1, sticky="w", pady=4)
+        ttk.Radiobutton(parent, text="eredetit (_conv marad)", variable=delete_conv, value="original").grid(row=0, column=2, sticky="w", padx=(8, 0), pady=4)
+        dry_run = tk.IntVar(value=1)
+        ttk.Checkbutton(parent, text="Próbafutás (csak listáz, nem töröl)", variable=dry_run).grid(row=1, column=1, sticky="w", pady=4)
+        self.action_params = {"dry_run": dry_run, "delete_conv": delete_conv}
+
     def _run(self) -> None:
         paths = [self.listbox.get(i).strip() for i in range(self.listbox.size()) if self.listbox.get(i).strip()]
         if not paths:
@@ -169,7 +229,7 @@ class App:
             uf = bool(p["upload_failed"].get())
             ur = self.upload_root.get().strip() or "/"
             ys = p["year_set"].get().strip() or "__2026__"
-            names = [os.path.basename(path) for path in paths]
+            names = [os.path.basename(path.rstrip("/")) for path in paths]
             if len(names) == 1:
                 self._run_in_background("Feltöltés", upload_single_folder, names[0], ak, asec, uf, ur, ys)
             else:
@@ -213,10 +273,36 @@ class App:
                 self._append("Figyelem: rendezéshez csak az első mappa kerül feldolgozásra.\n")
             self._run_in_background("Rendezés dátum szerint", organize_files_by_date, paths[0])
 
-    @staticmethod
-    def _pick_folder(var: tk.StringVar) -> None:
-        path = filedialog.askdirectory(initialdir=var.get() or os.path.expanduser("~"))
+        elif act == "Törlés kiterjesztés szerint":
+            exts = [f".{ext}" for ext, var in p["ext_vars"].items() if var.get()]
+            exts += [e.strip() for e in p["custom_extensions"].get().split(",") if e.strip()]
+            if not exts:
+                self._append("Hiba: adj meg legalább egy kiterjesztést.\n")
+                return
+            dry = bool(p["dry_run"].get())
+
+            def _run_delete_all(paths: list[str] = paths, exts: list[str] = exts, dry: bool = dry) -> None:
+                for path in paths:
+                    print(f"\n--- {path.rstrip('/')} ---")
+                    _delete_by_extension(path, exts, dry)
+
+            self._run_in_background(f"Törlés {'(próbafutás)' if dry else ''}", _run_delete_all)
+
+        elif act == "Duplikátum törlés (_conv)":
+            dry = bool(p["dry_run"].get())
+            delete_conv = p["delete_conv"].get() == "conv"
+
+            def _run_dedup_all(paths: list[str] = paths, dry: bool = dry, delete_conv: bool = delete_conv) -> None:
+                for path in paths:
+                    print(f"\n--- {path.rstrip('/')} ---")
+                    _delete_conv_duplicates(path, dry, delete_conv)
+
+            self._run_in_background(f"Duplikátum törlés {'(próbafutás)' if dry else ''}", _run_dedup_all)
+
+    def _pick_folder(self, var: tk.StringVar) -> None:
+        path = filedialog.askdirectory(initialdir=self._last_dir)
         if path:
+            self._last_dir = path
             var.set(path)
 
     def _run_in_background(self, label: str, fn, *args, **kwargs) -> None:
@@ -250,6 +336,64 @@ class App:
     def _append(self, text: str) -> None:
         self.output.insert("end", text)
         self.output.see("end")
+
+
+_CONV_SUFFIX = "_conv"
+
+
+def _delete_conv_duplicates(folder: str, dry_run: bool = True, delete_conv: bool = True) -> None:
+    deleted = 0
+    total_bytes = 0
+    for root, _, files in os.walk(folder):
+        lower_to_actual = {f.lower(): f for f in files}
+        for fname in files:
+            stem, ext = os.path.splitext(fname)
+            if stem.endswith(_CONV_SUFFIX):
+                original = stem.replace(_CONV_SUFFIX, "", 1) + ext
+                actual_original = lower_to_actual.get(original.lower())
+                if not actual_original:
+                    continue
+                to_delete = fname if delete_conv else actual_original
+                keep = actual_original if delete_conv else fname
+                full = os.path.join(root, to_delete)
+                size = os.path.getsize(full)
+                total_bytes += size
+                if dry_run:
+                    print(f"[próba] törölné: {full}  (megmarad: {keep})")
+                else:
+                    os.remove(full)
+                    print(f"Törölve: {full}  (megmarad: {keep})")
+                deleted += 1
+    action = "találat (próbafutás)" if dry_run else "fájl törölve"
+    if total_bytes >= 1024**3:
+        size_str = f"{total_bytes / 1024**3:.2f} GB"
+    else:
+        size_str = f"{total_bytes / 1024**2:.1f} MB"
+    print(f"\nÖsszesen {deleted} {action}, felszabadítható hely: {size_str}.")
+
+
+def _delete_by_extension(folder: str, extensions: list[str], dry_run: bool = True) -> None:
+    exts = {e.lower() if e.startswith(".") else f".{e.lower()}" for e in extensions}
+    deleted = 0
+    total_bytes = 0
+    for root, _, files in os.walk(folder):
+        for fname in files:
+            if os.path.splitext(fname)[1].lower() in exts:
+                full = os.path.join(root, fname)
+                size = os.path.getsize(full)
+                total_bytes += size
+                if dry_run:
+                    print(f"[próba] törölné: {full}")
+                else:
+                    os.remove(full)
+                    print(f"Törölve: {full}")
+                deleted += 1
+    action = "találat (próbafutás)" if dry_run else "fájl törölve"
+    if total_bytes >= 1024**3:
+        size_str = f"{total_bytes / 1024**3:.2f} GB"
+    else:
+        size_str = f"{total_bytes / 1024**2:.1f} MB"
+    print(f"\nÖsszesen {deleted} {action}, felszabadítható hely: {size_str}.")
 
 
 def _run_auto_exif(
