@@ -106,13 +106,14 @@ def copy_files_to_dest_until_mb_limit(file_list, dest_folder, mb_limit: int = 0,
 
 if __name__ == "__main__":
     # Example usage
-    folders = get_folders_from_path(folder_path="")
+    folders = get_folders_from_path(folder_path="/Users/trenyikadam/Documents/Kepek")
     print(f"Found {len(folders)} folders.")
-
+    all_files = []
     # Read files from each year folder
-
-    files_2025 = read_file_names_from_folder_recursively(folder_path="", folder_part_re=None, file_extension_list=[".jpg", ".jpeg", ".png"])
-
-    files = files_2025
-
-    copy_files_to_dest_until_mb_limit(file_list=files, dest_folder=os.path.abspath(""), count_limit=333)
+    for folder in folders:
+        files = read_file_names_from_folder_recursively(
+            folder_path=folder, folder_part_re=None, file_extension_list=[".jpg", ".jpeg", ".png"]
+        )
+        if files:
+            all_files.extend(files)
+    copy_files_to_dest_until_mb_limit(file_list=all_files, dest_folder=os.path.abspath("/Volumes/KEPEK"), count_limit=1000)

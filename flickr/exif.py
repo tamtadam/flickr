@@ -230,12 +230,7 @@ class MyExif:
 
     def _apply_to_folder(self, folder: Path) -> list[str]:
         # Collect all image files
-        image_files = [
-            Path(root) / name
-            for root, _, files in os.walk(folder)
-            for name in files
-            if name.endswith(IMAGE_EXTENSIONS)
-        ]
+        image_files = [Path(root) / name for root, _, files in os.walk(folder) for name in files if name.endswith(IMAGE_EXTENSIONS)]
 
         # Process each file in parallel with its own exiftool session
         def process(path: Path) -> Optional[str]:
@@ -306,23 +301,23 @@ class MyExif:
 
             # Build tag arguments for exiftool
             tag_args = []
-            for tag, value in self.lens.to_exiftool_dict().items():
-                # exiftool returns tags with EXIF: prefix in execute_json output
-                existing_tag_key = f"EXIF:{tag}"
-                if existing_tag_key not in existing_tags or not existing_tags[existing_tag_key]:
+            if existing_tags.get("EXIF:" + ExiftoolTag.LENS_MODEL.value) == "----":
+                print(f"[EXIF] skip {path.name}: lens model is set to '----', likely a placeholder for unknown lens")
+                if not self.overwrite:
+                    print(f"[EXIF] skip {path.name}: overwrite is disabled")
+                    return False
+                for tag, value in self.lens.to_exiftool_dict().items():
+                    # exiftool returns tags with EXIF: prefix in execute_json output
                     tag_args.append(f"-{tag}={value}")
-                elif self.overwrite:
-                    tag_args.append(f"-{tag}={value}")
-                else:
-                    print(f"[EXIF] skip {tag} on {path.name}: already set to {existing_tags[existing_tag_key]}")
 
             # Write tags if there are any to write
             if tag_args:
                 self._exiftool_helper.execute(*tag_args, "-overwrite_original", str(path))
-            return True
+                return True
         except Exception as e:
             print(f"[EXIF] exiftool failed for {path}: {type(e).__name__}: {_short_error(e)}")
             return False
+        return False
 
     def _verify_written_tags(self, path: Path) -> bool:
         """Verify that lens tags were written correctly to file.
@@ -481,12 +476,7 @@ class MyExif:
             return
 
         # Collect image files (including subdirectories)
-        image_files = [
-            Path(root) / name
-            for root, _, files in os.walk(path)
-            for name in files
-            if name.endswith(IMAGE_EXTENSIONS)
-        ]
+        image_files = [Path(root) / name for root, _, files in os.walk(path) for name in files if name.endswith(IMAGE_EXTENSIONS)]
 
         if not image_files:
             print(f"No image files found in '{folder_path}'")

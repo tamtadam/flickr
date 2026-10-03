@@ -34,13 +34,16 @@ def organize_files_by_date(source_folder: str) -> None:
             # Fallback to file's creation/modification time
             create_time = file_path.stat().st_birthtime if hasattr(file_path.stat(), "st_birthtime") else file_path.stat().st_mtime
 
-        date_folder_name = datetime.fromtimestamp(create_time).strftime("%Y_%m_%d")
-        date_folder_path = source_path / date_folder_name
-        date_folder_path.mkdir(exist_ok=True)
-        destination_path = date_folder_path / file_path.name
-        shutil.move(str(file_path), str(destination_path))
+        try:
+            date_folder_name = datetime.fromtimestamp(create_time).strftime("%Y_%m_%d")
+            date_folder_path = source_path / date_folder_name
+            date_folder_path.mkdir(exist_ok=True)
+            destination_path = date_folder_path / file_path.name
+            shutil.move(str(file_path), str(destination_path))
 
-        # Set file's modification time to match the EXIF datetime (or extracted time)
-        os.utime(str(destination_path), (create_time, create_time))
+            # Set file's modification time to match the EXIF datetime (or extracted time)
+            os.utime(str(destination_path), (create_time, create_time))
 
-        print(f"Moved: {file_path.name} -> {date_folder_name}/")
+            print(f"Moved: {file_path.name} -> {date_folder_name}/")
+        except Exception as e:
+            print(f"Error moving file '{file_path.name}': {e}")

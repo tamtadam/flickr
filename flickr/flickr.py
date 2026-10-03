@@ -521,7 +521,6 @@ class FlickrSync:
         shutil.copyfile(src=file.full_path, dst=os.path.join(folder, file.filename))
 
     def upload_photo(self, file: "FilesInSet", cnt: int = 3) -> Photo:
-        self.flickr.people.getLimits().call()
         if cnt <= 0:
             print(f"Failed to upload {file.filename_without_ext} after multiple attempts.")
             self.copy_failed_media_to_folder(file)

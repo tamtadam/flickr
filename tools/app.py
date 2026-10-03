@@ -86,7 +86,14 @@ class App:
             top,
             textvariable=self.action,
             state="readonly",
-            values=["Feltöltés", "Szinkronizálás", "Objektív EXIF", "Rendezés dátum szerint", "Törlés kiterjesztés szerint", "Duplikátum törlés (_conv)"],
+            values=[
+                "Feltöltés",
+                "Szinkronizálás",
+                "Objektív EXIF",
+                "Rendezés dátum szerint",
+                "Törlés kiterjesztés szerint",
+                "Duplikátum törlés (_conv)",
+            ],
             width=30,
         ).grid(row=1, column=1, sticky="w", pady=4)
         self.action.trace_add("write", self._rebuild_params)
@@ -153,7 +160,10 @@ class App:
         upload_failed = tk.IntVar(value=0)
         ttk.Checkbutton(parent, text="FAILED mappa újrapróbálása", variable=upload_failed).grid(row=4, column=1, sticky="w", pady=4)
 
-        self.action_params = {"api_key": api_key, "api_secret": api_secret, "upload_failed": upload_failed, "year_set": year_set}
+        conv_only = tk.IntVar(value=0)
+        ttk.Checkbutton(parent, text="Csak _conv képek + videók", variable=conv_only).grid(row=5, column=1, sticky="w", pady=4)
+
+        self.action_params = {"api_key": api_key, "api_secret": api_secret, "upload_failed": upload_failed, "year_set": year_set, "conv_only": conv_only}
 
     def _build_exif_params(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Objektív:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
@@ -185,9 +195,9 @@ class App:
 
     def _build_delete_params(self, parent: ttk.Frame) -> None:
         _PRESET_EXTS = ["LRV", "acr", "ARW", "XML"]
+        _PRESET_SUBSTRINGS = ["_conv", "_supersize", "_conv_supersize"]
 
         ttk.Label(parent, text="Kiterjesztések:").grid(row=0, column=0, sticky="nw", padx=(0, 8), pady=4)
-
         check_frame = ttk.Frame(parent)
         check_frame.grid(row=0, column=1, sticky="w", pady=4)
         ext_vars: dict[str, tk.IntVar] = {}
@@ -196,20 +206,44 @@ class App:
             ext_vars[ext] = var
             ttk.Checkbutton(check_frame, text=f".{ext}", variable=var).grid(row=0, column=i, sticky="w", padx=(0, 12))
 
-        ttk.Label(parent, text="Egyéb:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Label(parent, text="Egyéb ext.:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
         custom_extensions = tk.StringVar(value="")
         ttk.Entry(parent, textvariable=custom_extensions, width=40).grid(row=1, column=1, sticky="w", pady=4)
         ttk.Label(parent, text="(vesszővel elválasztva)", foreground="gray").grid(row=1, column=2, sticky="w", padx=(8, 0))
 
+        ttk.Label(parent, text="Fájlnév tartalmaz:").grid(row=2, column=0, sticky="nw", padx=(0, 8), pady=4)
+        substr_frame = ttk.Frame(parent)
+        substr_frame.grid(row=2, column=1, sticky="w", pady=4)
+        substr_vars: dict[str, tk.IntVar] = {}
+        for i, s in enumerate(_PRESET_SUBSTRINGS):
+            var = tk.IntVar(value=0)
+            substr_vars[s] = var
+            ttk.Checkbutton(substr_frame, text=s, variable=var).grid(row=0, column=i, sticky="w", padx=(0, 12))
+
+        ttk.Label(parent, text="Egyéb string:").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=4)
+        custom_substrings = tk.StringVar(value="")
+        ttk.Entry(parent, textvariable=custom_substrings, width=40).grid(row=3, column=1, sticky="w", pady=4)
+        ttk.Label(parent, text="(vesszővel elválasztva)", foreground="gray").grid(row=3, column=2, sticky="w", padx=(8, 0))
+
         dry_run = tk.IntVar(value=1)
-        ttk.Checkbutton(parent, text="Próbafutás (csak listáz, nem töröl)", variable=dry_run).grid(row=2, column=1, sticky="w", pady=4)
-        self.action_params = {"ext_vars": ext_vars, "custom_extensions": custom_extensions, "dry_run": dry_run}
+        ttk.Checkbutton(parent, text="Próbafutás (csak listáz, nem töröl)", variable=dry_run).grid(row=4, column=1, sticky="w", pady=4)
+        self.action_params = {
+            "ext_vars": ext_vars,
+            "custom_extensions": custom_extensions,
+            "substr_vars": substr_vars,
+            "custom_substrings": custom_substrings,
+            "dry_run": dry_run,
+        }
 
     def _build_dedup_params(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Törli:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
         delete_conv = tk.StringVar(value="conv")
-        ttk.Radiobutton(parent, text="_conv verziót (eredeti marad)", variable=delete_conv, value="conv").grid(row=0, column=1, sticky="w", pady=4)
-        ttk.Radiobutton(parent, text="eredetit (_conv marad)", variable=delete_conv, value="original").grid(row=0, column=2, sticky="w", padx=(8, 0), pady=4)
+        ttk.Radiobutton(parent, text="_conv verziót (eredeti marad)", variable=delete_conv, value="conv").grid(
+            row=0, column=1, sticky="w", pady=4
+        )
+        ttk.Radiobutton(parent, text="eredetit (_conv marad)", variable=delete_conv, value="original").grid(
+            row=0, column=2, sticky="w", padx=(8, 0), pady=4
+        )
         dry_run = tk.IntVar(value=1)
         ttk.Checkbutton(parent, text="Próbafutás (csak listáz, nem töröl)", variable=dry_run).grid(row=1, column=1, sticky="w", pady=4)
         self.action_params = {"dry_run": dry_run, "delete_conv": delete_conv}
@@ -229,11 +263,12 @@ class App:
             uf = bool(p["upload_failed"].get())
             ur = self.upload_root.get().strip() or "/"
             ys = p["year_set"].get().strip() or "__2026__"
+            co = bool(p["conv_only"].get())
             names = [os.path.basename(path.rstrip("/")) for path in paths]
             if len(names) == 1:
-                self._run_in_background("Feltöltés", upload_single_folder, names[0], ak, asec, uf, ur, ys)
+                self._run_in_background("Feltöltés", upload_single_folder, paths[0], ak, asec, uf, ur, ys, co)
             else:
-                self._run_in_background("Feltöltés (több mappa)", upload_multiple_folders, names, ak, asec, uf, ur, ys)
+                self._run_in_background("Feltöltés (több mappa)", upload_multiple_folders, paths, ak, asec, uf, ur, ys, co)
 
         elif act == "Szinkronizálás":
             ak = p["api_key"].get().strip()
@@ -276,15 +311,17 @@ class App:
         elif act == "Törlés kiterjesztés szerint":
             exts = [f".{ext}" for ext, var in p["ext_vars"].items() if var.get()]
             exts += [e.strip() for e in p["custom_extensions"].get().split(",") if e.strip()]
-            if not exts:
-                self._append("Hiba: adj meg legalább egy kiterjesztést.\n")
+            substrings = [s for s, var in p["substr_vars"].items() if var.get()]
+            substrings += [s.strip() for s in p["custom_substrings"].get().split(",") if s.strip()]
+            if not exts and not substrings:
+                self._append("Hiba: adj meg legalább egy kiterjesztést vagy fájlnév-stringet.\n")
                 return
             dry = bool(p["dry_run"].get())
 
-            def _run_delete_all(paths: list[str] = paths, exts: list[str] = exts, dry: bool = dry) -> None:
+            def _run_delete_all(paths: list[str] = paths, exts: list[str] = exts, substrings: list[str] = substrings, dry: bool = dry) -> None:
                 for path in paths:
                     print(f"\n--- {path.rstrip('/')} ---")
-                    _delete_by_extension(path, exts, dry)
+                    _delete_by_extension(path, exts, dry, substrings)
 
             self._run_in_background(f"Törlés {'(próbafutás)' if dry else ''}", _run_delete_all)
 
@@ -372,22 +409,27 @@ def _delete_conv_duplicates(folder: str, dry_run: bool = True, delete_conv: bool
     print(f"\nÖsszesen {deleted} {action}, felszabadítható hely: {size_str}.")
 
 
-def _delete_by_extension(folder: str, extensions: list[str], dry_run: bool = True) -> None:
+def _delete_by_extension(folder: str, extensions: list[str], dry_run: bool = True, substrings: list[str] | None = None) -> None:
     exts = {e.lower() if e.startswith(".") else f".{e.lower()}" for e in extensions}
+    subs = substrings or []
     deleted = 0
     total_bytes = 0
     for root, _, files in os.walk(folder):
         for fname in files:
-            if os.path.splitext(fname)[1].lower() in exts:
-                full = os.path.join(root, fname)
-                size = os.path.getsize(full)
-                total_bytes += size
-                if dry_run:
-                    print(f"[próba] törölné: {full}")
-                else:
-                    os.remove(full)
-                    print(f"Törölve: {full}")
-                deleted += 1
+            stem, ext = os.path.splitext(fname)
+            matches_ext = ext.lower() in exts
+            matches_sub = any(stem.endswith(s) for s in subs)
+            if not (matches_ext or matches_sub):
+                continue
+            full = os.path.join(root, fname)
+            size = os.path.getsize(full)
+            total_bytes += size
+            if dry_run:
+                print(f"[próba] törölné: {full}")
+            else:
+                os.remove(full)
+                print(f"Törölve: {full}")
+            deleted += 1
     action = "találat (próbafutás)" if dry_run else "fájl törölve"
     if total_bytes >= 1024**3:
         size_str = f"{total_bytes / 1024**3:.2f} GB"
